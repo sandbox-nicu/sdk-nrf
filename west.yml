@@ -19,7 +19,7 @@ manifest:
     # nRF Connect SDK GitHub organization.
     # NCS repositories are hosted here.
     - name: fork_mcuboot
-      url-base: https://github.com/sandbox-nicu/sdk-mcuboot
+      url-base: https://github.com/sandbox-nicu
     - name: ncs
       url-base: https://github.com/nrfconnect
     # Third-party repository sources:
