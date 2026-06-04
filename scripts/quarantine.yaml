@@ -15,12 +15,6 @@
   comment: "https://nordicsemi.atlassian.net/browse/NCSDK-38328"
 
 - scenarios:
-    - nrf.extended.sample.basic.blinky
-  platforms:
-    - nrf54lm20dongle/nrf54lm20b/cpuapp
-  comment: "https://nordicsemi.atlassian.net/browse/NCSDK-39226"
-
-- scenarios:
     - nrf.extended.drivers.uart.async_dual
     - nrf.extended.drivers.uart.async_dual.busy_sim
     - nrf.extended.drivers.uart.async_dual.pm_runtime
@@ -37,12 +31,6 @@
   platforms:
     - nrf9251dk@0.1.0/nrf9251/cpuapp
   comment: "https://nordicsemi.atlassian.net/browse/NRFX-9393"
-
-- scenarios:
-    - drivers.gpio.gpio_nfct
-  platforms:
-    - nrf7120dk/nrf7120/cpuapp
-  comment: "https://nordicsemi.atlassian.net/browse/NCSDK-39364"
 
 - scenarios:
     - nrf.extended.drivers.clock.nrf_clock_control
@@ -118,10 +106,17 @@
   comment: "https://nordicsemi.atlassian.net/browse/NRFX-9631"
 
 - scenarios:
-    - sample.bluetooth.mesh.chat
-    - sample.bluetooth.mesh.ble_and_mesh
-    - sample.bluetooth.mesh.light_ctrl
-    - sample.bluetooth.mesh.sensor_server
+    - sample.debug.memfault
+    - sample.debug.memfault.etb
   platforms:
-    - nrf52dk/nrf52832
-  comment: "https://nordicsemi.atlassian.net/browse/NCSDK-39503"
+    - nrf9160dk@0.14.0/nrf9160/ns
+    - nrf9161dk@0.9.0/nrf9161/ns
+  comment: "https://nordicsemi.atlassian.net/browse/NCSDK-39678"
+
+- scenarios:
+    - sample.debug.memfault
+    - sample.debug.memfault.etb
+    - sample.debug.memfault.modem_trace_to_memfault
+  platforms:
+    - nrf9151dk/nrf9151/ns
+  comment: "https://nordicsemi.atlassian.net/browse/NCSDK-39678"

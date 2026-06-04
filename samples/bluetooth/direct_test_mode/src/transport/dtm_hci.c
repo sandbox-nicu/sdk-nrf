@@ -171,8 +171,7 @@ static int cte_set(uint8_t cte_len, uint8_t cte_type,
 
 	switch (cte_type) {
 	case BT_HCI_LE_AOA_CTE:
-		err = dtm_setup_set_cte_mode(DTM_CTE_TYPE_AOA, cte_len);
-		break;
+		return dtm_setup_set_cte_mode(DTM_CTE_TYPE_AOA, cte_len);
 
 	case BT_HCI_LE_AOD_CTE_1US:
 		err = dtm_setup_set_cte_mode(DTM_CTE_TYPE_AOD_1US, cte_len);
@@ -624,7 +623,7 @@ static int hci_tx_test(uint16_t opcode, const uint8_t *data)
 	}
 
 	if ((cte_len != 0) &&
-		(phy != BT_HCI_LE_TX_PHY_CODED_S8) && (phy != BT_HCI_LE_TX_PHY_CODED_S2)) {
+		((phy == BT_HCI_LE_TX_PHY_CODED_S8) || (phy == BT_HCI_LE_TX_PHY_CODED_S2))) {
 		return base_cc_evt(opcode, BT_HCI_ERR_CMD_DISALLOWED);
 	}
 
@@ -703,6 +702,12 @@ static int hci_cmd(const struct bt_hci_cmd_hdr *hdr, const uint8_t *data)
 	case BT_HCI_OP_LE_TEST_END:
 		LOG_INF("Executing HCI LE Test End command.");
 		return hci_test_end();
+
+	case BT_HCI_OP_SET_EVENT_MASK:
+	case BT_HCI_OP_LE_SET_EVENT_MASK:
+		LOG_INF("Tester sets HCI event mask, do nothing");
+		/* Ignore command parameters, and simply return success */
+		return base_cc_evt(cmd, BT_HCI_ERR_SUCCESS);
 
 	default:
 		LOG_ERR("Unknown HCI command opcode: 0x%04x", cmd);
