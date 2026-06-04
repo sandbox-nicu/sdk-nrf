@@ -55,7 +55,7 @@ jobs:
       run: |
         export PATH="$HOME/.local/bin:$PATH"
         export PATH="$HOME/bin:$PATH"
-        ./scripts/ci/check_manifest_license.py \
+        python3 ./scripts/ci/check_manifest_license.py \
             --github \
             -l ./scripts/ci/license_allow_list.yaml \
             -c origin/${BASE_REF}..
