@@ -67,7 +67,7 @@ manifest:
     # https://developer.nordicsemi.com/nRF_Connect_SDK/doc/latest/zephyr/guides/modules.html
     - name: zephyr
       repo-path: sdk-zephyr
-      revision: ab3701f67f47b2cb4c1682cff91c6607a21f4396
+      revision: db7fef406c7cd80a5ca27148407323b5e185a1fc
       import:
         # In addition to the zephyr repository itself, NCS also
         # imports the contents of zephyr/west.yml at the above
@@ -130,8 +130,9 @@ manifest:
           upstream-sha: 1225729e8d84075f03bf9fc51eee85d84dfb0091
           compare-by-default: true
     - name: mcuboot
+      remote: fork_mcuboot
       repo-path: sdk-mcuboot
-      revision: 348bc330396be856b78f2c261597121923bc582b
+      revision: 69c7ba763a237c99f069bd24f2a2374f25103a85
       path: bootloader/mcuboot
     - name: qcbor
       repo-path: sdk-qcbor
@@ -152,7 +153,7 @@ manifest:
     - name: nrfxlib
       repo-path: sdk-nrfxlib
       path: nrfxlib
-      revision: e4635cd2f1ebccebb05c9a278d171b87d8c1d64d
+      revision: e7b346ce24268dc69d08888e586e42a0162a22ea
     - name: trusted-firmware-m
       repo-path: sdk-trusted-firmware-m
       path: modules/tee/tf-m/trusted-firmware-m
@@ -164,7 +165,7 @@ manifest:
     - name: matter
       repo-path: sdk-connectedhomeip
       path: modules/lib/matter
-      revision: 6d8ea97f38836957651f4d976d1d9fa304489fbe
+      revision: 494ce1882ddfeb64cf23a462c1265f95aba93ed4
       west-commands: scripts/west/west-commands.yml
       submodules:
         - name: nlio
@@ -190,7 +191,7 @@ manifest:
       # Only for internal Nordic development
       repo-path: dragoon.git
       remote: dragoon
-      revision: 40edf29d503a8aa3c57b155423b3854baeb30532
+      revision: ffdf237cc682d8cd691b5dab2003bb5d6a16de93
       groups:
         - dragoon
     - name: cjson
