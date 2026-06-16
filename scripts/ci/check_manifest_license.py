@@ -38,7 +38,7 @@ import junit_xml
 import yaml
 from west.manifest import ImportFlag, Manifest
 
-NRFCONNECT_URL_PREFIX = 'https://github.com/nrfconnect/'
+NRFCONNECT_URL_PREFIX = 'https://github.com/sandbox-nicu/'
 
 # Messages shown in the output
 LICENSE_ALLOWED = '"*" license is allowed for this file.'

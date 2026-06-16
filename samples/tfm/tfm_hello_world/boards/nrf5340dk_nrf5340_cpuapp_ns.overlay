@@ -1,0 +1,69 @@
+/*
+ * Copyright (c) 2026 Nordic Semiconductor
+ *
+ * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+ */
+
+/delete-node/ &boot_partition;
+/delete-node/ &slot0_partition;
+/delete-node/ &slot1_partition;
+/delete-node/ &storage_partition;
+
+/delete-node/ &tfm_its_partition;
+/delete-node/ &tfm_otp_partition;
+/delete-node/ &tfm_ps_partition;
+
+&flash0 {
+	partitions {
+		/* Sized to accommodate the full TF-M profile (selected by
+		 * CONFIG_TFM_PROFILE_TYPE_NOT_SET=y in the .full / .lvl2 test
+		 * variants), matching the slot0_s split used by
+		 * tfm_secure_peripheral. The minimal profile used by the
+		 * default and bootloaders builds easily fits in this region.
+		 */
+		slot0_s_partition: partition@0 {
+			compatible = "zephyr,mapped-partition";
+			label = "image-0-secure";
+			reg = <0x0 0x40000>;
+		};
+
+		slot0_ns_partition: partition@40000 {
+			compatible = "zephyr,mapped-partition";
+			label = "image-0-nonsecure";
+			reg = <0x40000 0xb4000>;
+		};
+
+		/* TF-M storage region for the full / lvl2 profiles. The
+		 * minimal profile used by the default and bootloaders builds
+		 * does not consume these partitions, so they only cost flash
+		 * when CONFIG_TFM_PROFILE_TYPE_NOT_SET=y selects a profile
+		 * with PS/ITS/OTP enabled.
+		 */
+		tfm_storage_partition: partition@f4000 {
+			compatible = "zephyr,mapped-partition";
+			label = "tfm-storage";
+			reg = <0xf4000 DT_SIZE_K(48)>;
+			ranges = <0x0 0xf4000 DT_SIZE_K(48)>;
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			tfm_its_partition: partition@0 {
+				compatible = "zephyr,mapped-partition";
+				label = "tfm-its";
+				reg = <0x0 DT_SIZE_K(8)>;
+			};
+
+			tfm_otp_partition: partition@4000 {
+				compatible = "zephyr,mapped-partition";
+				label = "tfm-otp";
+				reg = <0x4000 DT_SIZE_K(8)>;
+			};
+
+			tfm_ps_partition: partition@8000 {
+				compatible = "zephyr,mapped-partition";
+				label = "tfm-ps";
+				reg = <0x8000 DT_SIZE_K(16)>;
+			};
+		};
+	};
+};

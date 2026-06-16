@@ -493,6 +493,7 @@ function(${SYSBUILD_CURRENT_MODULE_NAME}_pre_cmake)
        OR SB_CONFIG_MCUBOOT_COMPRESSED_IMAGE_SUPPORT
        OR SB_CONFIG_MCUBOOT_HARDWARE_DOWNGRADE_PREVENTION
        # Do not use the upstream mcuboot.cmake on new platforms.
+       OR SB_CONFIG_SOC_SERIES_NRF53
        OR SB_CONFIG_SOC_SERIES_NRF54L
        OR SB_CONFIG_SOC_SERIES_NRF54H OR SB_CONFIG_QSPI_XIP_SPLIT_IMAGE
        # TF-M NS builds require signing tfm_merged.hex, not zephyr.hex.
@@ -1028,24 +1029,21 @@ function(${SYSBUILD_CURRENT_MODULE_NAME}_pre_cmake)
       set_config_bool(${image} CONFIG_CRACEN_KMU_INVALIDATE_PROTECTED_RAM_SLOTS n)
     endforeach()
   endif()
-
 endfunction(${SYSBUILD_CURRENT_MODULE_NAME}_pre_cmake)
 
-function(${SYSBUILD_CURRENT_MODULE_NAME}_pre_image_cmake)
-  cmake_parse_arguments(PRE_IMAGE_CMAKE "" "IMAGE" "" ${ARGN})
+function(${SYSBUILD_CURRENT_MODULE_NAME}_post_image_cmake)
+  cmake_parse_arguments(POST_IMAGE_CMAKE "" "IMAGE" "" ${ARGN})
 
-  get_property(variant_app TARGET ${PRE_IMAGE_CMAKE_IMAGE} PROPERTY NCS_VARIANT_APPLICATION)
-  if(NOT "${variant_app}" STREQUAL "")
-    set(variant_image ${PRE_IMAGE_CMAKE_IMAGE})
+  if(SB_CONFIG_SECURE_BOOT_APPCORE AND SB_CONFIG_BOARD_IS_NON_SECURE AND
+    NOT SB_CONFIG_PARTITION_MANAGER AND "${POST_IMAGE_CMAKE_IMAGE}" STREQUAL "b0"
+  )
+    forward_bl_storage_addr(${DEFAULT_IMAGE})
 
-    get_cmake_property(sysbuild_cache CACHE_VARIABLES)
-    foreach(var_name ${sysbuild_cache})
-      if("${var_name}" MATCHES "^${variant_app}_(.*)$")
-        set(${variant_image}_${CMAKE_MATCH_1} "${${var_name}}" CACHE UNINITIALIZED "" FORCE)
-      endif()
-    endforeach()
+    if(NOT SB_CONFIG_BOOTLOADER_MCUBOOT)
+      forward_bl_storage_addr(${DEFAULT_IMAGE}_s1_variant)
+    endif()
   endif()
-endfunction(${SYSBUILD_CURRENT_MODULE_NAME}_pre_image_cmake)
+endfunction(${SYSBUILD_CURRENT_MODULE_NAME}_post_image_cmake)
 
 # Sysbuild function hooks used by nRF Connect SDK
 function(${SYSBUILD_CURRENT_MODULE_NAME}_post_cmake)
@@ -1252,6 +1250,7 @@ include(${CMAKE_CURRENT_LIST_DIR}/flprcore.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/pprcore.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/radio_loader.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/secureboot.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/tfm_bl_storage.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/mcuboot.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/firmware_loader_radio.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/firmware_loader_installer.cmake)
