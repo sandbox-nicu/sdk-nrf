@@ -127,6 +127,15 @@ function(zephyr_mcuboot_tasks)
       set(imgtool_rom_command --align ${write_block_size})
     endif()
 
+    # Set ih_load_addr to the code partition address using --rom-fixed.
+    # This allows MCUboot to match an update candidate to the primary slot when the
+    # secondary slot is shared, including for encrypted images.
+    if(CONFIG_NCS_MCUBOOT_IMGTOOL_SET_ROM_FIXED_ADDRESS)
+      dt_chosen(code_partition PROPERTY "zephyr,code-partition")
+      dt_partition_addr(code_partition_address PATH "${code_partition}" ABSOLUTE REQUIRED)
+      set(imgtool_rom_command ${imgtool_rom_command} --rom-fixed ${code_partition_address})
+    endif()
+
     # TF-M combined images need --pad-header because the MCUboot header gap is
     # at the combined slot start (in tfm_s.hex), not at the NS partition start.
     set(imgtool_pad_header_arg)
@@ -273,7 +282,9 @@ function(zephyr_mcuboot_tasks)
     # just signed one does not.
     # Only NRF54L gets the HMAC-SHA512, other remain with previously used
     # SHA256.
-    if(CONFIG_SOC_SERIES_NRF54L AND CONFIG_MCUBOOT_BOOTLOADER_SIGNATURE_TYPE_ED25519)
+    if(CONFIG_SOC_SERIES_NRF54L AND CONFIG_MCUBOOT_BOOTLOADER_SIGNATURE_TYPE_ED25519 AND
+      NOT CONFIG_NCS_MCUBOOT_ENCRYPTION_HMAC_SHA256
+    )
       set(imgtool_encrypt_extra_args --hmac-sha 512)
     endif()
   endif()

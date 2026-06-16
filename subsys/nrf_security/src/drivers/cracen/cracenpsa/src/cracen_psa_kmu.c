@@ -5,10 +5,8 @@
  */
 
 #include <zephyr/kernel.h>
-#include <nrfx.h>
 #include <nrf_security_mem_helpers.h>
 #include <cracen/statuscodes.h>
-#include <cracen/lib_kmu.h>
 #include <nrf_security_mutexes.h>
 #include <psa/crypto.h>
 #include <stdint.h>
@@ -20,6 +18,16 @@
 #include <cracen/common.h>
 #include <internal/ecc/cracen_ecc_helpers.h>
 #include <cracen/cracen_kmu.h>
+
+#include <nrfx.h>
+#include <nrfx_kmu.h>
+
+#if defined(CONFIG_SOC_SERIES_NRF54L)
+#include <nrfx_rramc.h>
+#elif defined(CONFIG_SOC_SERIES_NRF71)
+#include <nrfx_mramc.h>
+#define MRAM_CONFIGNVR_SICR_PAGE 3
+#endif
 
 /* The size of the key CBR (Compact Binary Respresentation), bytes */
 #define CRACEN_KMU_CBR_SIZE		     1u
@@ -231,6 +239,67 @@ static psa_status_t cracen_kmu_decrypt(kmu_metadata *metadata, size_t number_of_
 
 #endif /* PSA_NEED_CRACEN_KMU_ENCRYPTED_KEYS */
 
+static void cracen_kmu_key_slot_provision_write_enable_set(bool enable,
+							   uint8_t *orig_write_buf_size)
+{
+#if defined(CONFIG_SOC_SERIES_NRF54L)
+#if defined(__NRF_TFM__)
+	nrf_rramc_config_t rramc_config;
+
+	nrf_rramc_config_get(NRF_RRAMC_S, &rramc_config);
+	if (enable) {
+		*orig_write_buf_size = rramc_config.write_buff_size;
+		rramc_config.write_buff_size = 0;
+	} else {
+		rramc_config.write_buff_size = *orig_write_buf_size;
+	}
+	nrf_rramc_config_set(NRF_RRAMC_S, &rramc_config);
+#else
+	nrfx_rramc_write_enable_set(enable, 0);
+#endif /* __NRF_TFM__ */
+
+#elif defined(CONFIG_SOC_SERIES_NRF71)
+	/* Enable/disable write and erase from KMU to SICR in MRAM */
+	nrfx_mramc_confignvr_perm_set(enable, MRAM_CONFIGNVR_SICR_PAGE);
+#endif /* CONFIG_SOC_SERIES_NRF71 */
+}
+
+static int cracen_kmu_key_slot_provision(const nrfx_kmu_key_slot_data_t *key_slot_data,
+					 uint32_t slot_id)
+{
+	int kmu_status;
+	uint8_t orig_write_buf_size;
+
+	cracen_kmu_key_slot_provision_write_enable_set(true, &orig_write_buf_size);
+
+	kmu_status = nrfx_kmu_key_slot_provision(key_slot_data, slot_id);
+
+	cracen_kmu_key_slot_provision_write_enable_set(false, &orig_write_buf_size);
+	return kmu_status;
+}
+
+static void cracen_kmu_key_slot_revoke_enable_set(bool enable)
+{
+#if !defined(__NRF_TFM__) && defined(CONFIG_SOC_SERIES_NRF54L)
+	nrfx_rramc_write_enable_set(enable, 0);
+#elif defined(CONFIG_SOC_SERIES_NRF71)
+	/* Enable/disable write and erase from KMU to SICR in MRAM */
+	nrfx_mramc_confignvr_perm_set(enable, MRAM_CONFIGNVR_SICR_PAGE);
+#endif
+}
+
+static int cracen_kmu_key_slots_revoke(uint32_t slot_id, uint32_t num_slots)
+{
+	int kmu_status;
+
+	cracen_kmu_key_slot_revoke_enable_set(true);
+
+	kmu_status = nrfx_kmu_key_slots_revoke(slot_id, num_slots);
+
+	cracen_kmu_key_slot_revoke_enable_set(false);
+	return kmu_status;
+}
+
 #if defined(CONFIG_CRACEN_PROVISION_PROT_RAM_INV_SLOTS_ON_INIT) ||                                 \
 	defined(CONFIG_CRACEN_PROVISION_PROT_RAM_INV_SLOTS_WITH_IMPORT)
 psa_status_t cracen_provision_prot_ram_inv_slots(void)
@@ -241,8 +310,11 @@ psa_status_t cracen_provision_prot_ram_inv_slots(void)
 	psa_status_t psa_status;
 	int kmu_slot;
 
-	needs_provisioning = lib_kmu_is_slot_empty(PROTECTED_RAM_INVALIDATION_DATA_SLOT1) ||
-			     lib_kmu_is_slot_empty(PROTECTED_RAM_INVALIDATION_DATA_SLOT2);
+	if (nrfx_kmu_key_slots_empty_check(PROTECTED_RAM_INVALIDATION_DATA_SLOT1,
+					   PROTECTED_RAM_INVALIDATION_DATA_SLOTS_COUNT,
+					   &needs_provisioning) != 0) {
+		return PSA_ERROR_HARDWARE_FAILURE;
+	}
 
 	if (!needs_provisioning) {
 		return PSA_SUCCESS;
@@ -291,26 +363,25 @@ int cracen_kmu_prepare_key(const uint8_t *user_data)
 	switch (key->key_usage_scheme) {
 	case CRACEN_KMU_KEY_USAGE_SCHEME_RAW:
 	case CRACEN_KMU_KEY_USAGE_SCHEME_PROTECTED:
-		for (size_t i = 0; i < key->number_of_slots; i++) {
-			if (lib_kmu_push_slot(key->slot_id + i) != 0) {
-				return SX_ERR_UNKNOWN_ERROR;
-			}
+		if (nrfx_kmu_key_slots_push(key->slot_id, key->number_of_slots) != 0) {
+			return SX_ERR_UNKNOWN_ERROR;
 		}
+
 		return SX_OK;
 #ifdef PSA_NEED_CRACEN_KMU_ENCRYPTED_KEYS
 	case CRACEN_KMU_KEY_USAGE_SCHEME_ENCRYPTED: {
-		kmu_metadata metadata;
+		nrfx_kmu_key_slot_metadata_t metadata;
 
-		if (lib_kmu_read_metadata((int)key->slot_id, (uint32_t *)&metadata) != 0) {
+		if (nrfx_kmu_key_slot_metadata_read(key->slot_id, &metadata) != 0) {
 			return SX_ERR_INVALID_KEYREF;
 		}
-		for (size_t i = 0; i < key->number_of_slots; i++) {
-			if (lib_kmu_push_slot(key->slot_id + i) != 0) {
-				return SX_ERR_UNKNOWN_ERROR;
-			}
+
+		if (nrfx_kmu_key_slots_push(key->slot_id, key->number_of_slots) != 0) {
+			return SX_ERR_UNKNOWN_ERROR;
 		}
 
-		psa_status_t psa_status = cracen_kmu_decrypt(&metadata, key->number_of_slots);
+		psa_status_t psa_status = cracen_kmu_decrypt((kmu_metadata *)&metadata.metadata,
+							     key->number_of_slots);
 
 		if (psa_status != PSA_SUCCESS) {
 			return SX_ERR_PLATFORM_ERROR;
@@ -329,21 +400,21 @@ int cracen_kmu_prepare_key(const uint8_t *user_data)
 psa_status_t cracen_push_prot_ram_inv_slots(void)
 {
 	bool any_slot_empty;
+	int kmu_status;
 
-	any_slot_empty = lib_kmu_is_slot_empty(PROTECTED_RAM_INVALIDATION_DATA_SLOT1) ||
-			 lib_kmu_is_slot_empty(PROTECTED_RAM_INVALIDATION_DATA_SLOT2);
-	if (any_slot_empty) {
+	kmu_status = nrfx_kmu_key_slots_empty_check(PROTECTED_RAM_INVALIDATION_DATA_SLOT1,
+						    PROTECTED_RAM_INVALIDATION_DATA_SLOTS_COUNT,
+						    &any_slot_empty);
+
+	if (any_slot_empty || kmu_status != 0) {
 		return PSA_ERROR_HARDWARE_FAILURE;
 	}
 
-	if (lib_kmu_push_slot(PROTECTED_RAM_INVALIDATION_DATA_SLOT1) != LIB_KMU_SUCCESS) {
+	kmu_status = nrfx_kmu_key_slots_push(PROTECTED_RAM_INVALIDATION_DATA_SLOT1,
+					     PROTECTED_RAM_INVALIDATION_DATA_SLOTS_COUNT);
+	if (kmu_status != 0) {
 		return PSA_ERROR_HARDWARE_FAILURE;
 	}
-
-	if (lib_kmu_push_slot(PROTECTED_RAM_INVALIDATION_DATA_SLOT2) != LIB_KMU_SUCCESS) {
-		return PSA_ERROR_HARDWARE_FAILURE;
-	}
-
 	return PSA_SUCCESS;
 }
 
@@ -376,14 +447,22 @@ static bool is_secondary_slot(kmu_metadata *metadata)
 
 static psa_status_t read_primary_slot_metadata(unsigned int slot_id, kmu_metadata *metadata)
 {
-	const int kmu_status = lib_kmu_read_metadata(slot_id, (uint32_t *)metadata);
+	int kmu_status;
+	nrfx_kmu_key_slot_metadata_t slot_metadata;
 
-	if (kmu_status == -LIB_KMU_REVOKED) {
-		return PSA_ERROR_NOT_PERMITTED;
-	}
-	if (kmu_status == -LIB_KMU_ERROR || is_secondary_slot(metadata)) {
+	kmu_status = nrfx_kmu_key_slot_metadata_read(slot_id, &slot_metadata);
+	if (kmu_status < 0) {
+		if (kmu_status == -EACCES) {
+			return PSA_ERROR_NOT_PERMITTED;
+		}
 		return PSA_ERROR_DOES_NOT_EXIST;
 	}
+
+	memcpy(metadata, &slot_metadata.metadata, sizeof(kmu_metadata));
+	if (is_secondary_slot(metadata)) {
+		return PSA_ERROR_DOES_NOT_EXIST;
+	}
+
 	return PSA_SUCCESS;
 }
 
@@ -419,24 +498,30 @@ static bool can_derive(const psa_key_attributes_t *key_attr)
  */
 static psa_status_t clean_up_unfinished_provisioning(void)
 {
-	uint32_t data;
-	int st = lib_kmu_read_metadata(PROVISIONING_SLOT, &data);
+	nrfx_kmu_key_slot_metadata_t slot_metadata;
+	bool slot_empty;
+	int kmu_status = nrfx_kmu_key_slot_metadata_read(PROVISIONING_SLOT, &slot_metadata);
 
-	if (st == LIB_KMU_SUCCESS) {
-		uint32_t slot_id = data >> 8;
-		uint32_t num_slots = data & 0xff;
+	if (kmu_status == 0) {
+		uint32_t slot_id = slot_metadata.metadata >> 8;
+		uint32_t num_slots = slot_metadata.metadata & 0xff;
 
 		for (uint32_t i = 0; i < num_slots; i++) {
-			st = lib_kmu_revoke_slot(slot_id + i);
-			if (st != LIB_KMU_SUCCESS) {
-				if (!lib_kmu_is_slot_empty(slot_id + i)) {
+			/** Revoking slots one-by-one here to be able to check
+			 *  if specific slot is empty in case of failure
+			 */
+			kmu_status = cracen_kmu_key_slots_revoke(slot_id + i, 1);
+			if (kmu_status != 0) {
+				kmu_status = nrfx_kmu_key_slots_empty_check(slot_id + i, 1,
+									    &slot_empty);
+				if (kmu_status != 0 || !slot_empty) {
 					return PSA_ERROR_HARDWARE_FAILURE;
 				}
 			}
 		}
 
-		st = lib_kmu_revoke_slot(PROVISIONING_SLOT);
-		if (st != LIB_KMU_SUCCESS) {
+		kmu_status = cracen_kmu_key_slots_revoke(PROVISIONING_SLOT, 1);
+		if (kmu_status != 0) {
 			return PSA_ERROR_HARDWARE_FAILURE;
 		}
 	}
@@ -455,16 +540,17 @@ static psa_status_t clean_up_unfinished_provisioning(void)
  */
 static psa_status_t set_provisioning_in_progress(uint32_t slot_id, uint32_t num_slots)
 {
-	struct kmu_src kmu_desc = {};
+	int kmu_status;
+	nrfx_kmu_key_slot_data_t key_slot_data = {};
 
-	kmu_desc.metadata = slot_id << 8 | num_slots;
-	kmu_desc.rpolicy = LIB_KMU_REV_POLICY_ROTATING;
+	key_slot_data.metadata.metadata = slot_id << 8 | num_slots;
+	key_slot_data.revoke_policy = NRFX_KMU_RPOLICY_ROTATING;
 
-	int st = lib_kmu_provision_slot(PROVISIONING_SLOT, &kmu_desc);
-
-	if (st != LIB_KMU_SUCCESS) {
+	kmu_status = cracen_kmu_key_slot_provision(&key_slot_data, PROVISIONING_SLOT);
+	if (kmu_status != 0) {
 		return PSA_ERROR_HARDWARE_FAILURE;
 	}
+
 	return PSA_SUCCESS;
 }
 
@@ -475,7 +561,7 @@ static psa_status_t set_provisioning_in_progress(uint32_t slot_id, uint32_t num_
  */
 static psa_status_t end_provisioning(void)
 {
-	if (lib_kmu_revoke_slot(PROVISIONING_SLOT) != LIB_KMU_SUCCESS) {
+	if (cracen_kmu_key_slots_revoke(PROVISIONING_SLOT, 1) != 0) {
 		return PSA_ERROR_HARDWARE_FAILURE;
 	}
 	return PSA_SUCCESS;
@@ -484,6 +570,8 @@ static psa_status_t end_provisioning(void)
 static psa_status_t get_kmu_slot_count(kmu_metadata metadata, const psa_key_attributes_t *key_attr,
 				       unsigned int *slot_count)
 {
+	psa_key_type_t key_type = psa_get_key_type(key_attr);
+
 	switch (metadata.size) {
 	case METADATA_ALG_KEY_BITS_128:
 		*slot_count = 1;
@@ -491,8 +579,8 @@ static psa_status_t get_kmu_slot_count(kmu_metadata metadata, const psa_key_attr
 	case METADATA_ALG_KEY_BITS_192:
 	case METADATA_ALG_KEY_BITS_255:
 	case METADATA_ALG_KEY_BITS_256:
-		if (psa_get_key_type(key_attr) ==
-			PSA_KEY_TYPE_ECC_PUBLIC_KEY(PSA_ECC_FAMILY_SECP_R1)) {
+		if (IS_ENABLED(PSA_NEED_CRACEN_ECDSA) &&
+		    key_type == PSA_KEY_TYPE_ECC_PUBLIC_KEY(PSA_ECC_FAMILY_SECP_R1)) {
 			*slot_count = 4;
 		} else {
 			*slot_count = 2;
@@ -502,8 +590,8 @@ static psa_status_t get_kmu_slot_count(kmu_metadata metadata, const psa_key_attr
 		*slot_count = 3;
 		break;
 	case METADATA_ALG_KEY_BITS_384:
-		if (psa_get_key_type(key_attr) ==
-			PSA_KEY_TYPE_ECC_PUBLIC_KEY(PSA_ECC_FAMILY_SECP_R1)) {
+		if (IS_ENABLED(PSA_NEED_CRACEN_ECDSA) &&
+		    key_type == PSA_KEY_TYPE_ECC_PUBLIC_KEY(PSA_ECC_FAMILY_SECP_R1)) {
 			*slot_count = 6;
 		} else {
 			*slot_count = 3;
@@ -559,10 +647,8 @@ psa_status_t cracen_kmu_destroy_key(const psa_key_attributes_t *attributes)
 		 * being blocked. Therefore we attempt to push the key here to verify if the key is
 		 * blocked or not.
 		 */
-		for (size_t i = 0; i < slot_count; i++) {
-			if (lib_kmu_push_slot(slot_id + i) != 0) {
-				return PSA_ERROR_NOT_PERMITTED;
-			}
+		if (nrfx_kmu_key_slots_push(slot_id, slot_count) != 0) {
+			return PSA_ERROR_NOT_PERMITTED;
 		}
 
 		/* Clean the key data from the push area and protected ram to ensure it's not
@@ -596,13 +682,13 @@ static psa_status_t convert_to_psa_attributes(kmu_metadata *metadata,
 	}
 
 	switch (metadata->rpolicy) {
-	case LIB_KMU_REV_POLICY_ROTATING:
+	case NRFX_KMU_RPOLICY_ROTATING:
 		key_persistence = PSA_KEY_PERSISTENCE_DEFAULT;
 		break;
-	case LIB_KMU_REV_POLICY_REVOKED:
+	case NRFX_KMU_RPOLICY_REVOKED:
 		key_persistence = CRACEN_KEY_PERSISTENCE_REVOKABLE;
 		break;
-	case LIB_KMU_REV_POLICY_LOCKED:
+	case NRFX_KMU_RPOLICY_LOCKED:
 		key_persistence = CRACEN_KEY_PERSISTENCE_READ_ONLY;
 		break;
 	default:
@@ -816,6 +902,7 @@ static psa_status_t convert_from_psa_attributes(const psa_key_attributes_t *key_
 {
 	int kmu_slot;
 	psa_algorithm_t key_algorithm;
+	psa_key_type_t key_type;
 
 	memset(metadata, 0, sizeof(*metadata));
 	metadata->metadata_version = 0;
@@ -843,7 +930,7 @@ static psa_status_t convert_from_psa_attributes(const psa_key_attributes_t *key_
 	}
 
 	if (metadata->key_usage_scheme == CRACEN_KMU_KEY_USAGE_SCHEME_SEED) {
-		metadata->rpolicy = LIB_KMU_REV_POLICY_LOCKED;
+		metadata->rpolicy = NRFX_KMU_RPOLICY_LOCKED;
 		metadata->size = METADATA_ALG_KEY_BITS_384_SEED;
 		return PSA_SUCCESS;
 	}
@@ -853,11 +940,13 @@ static psa_status_t convert_from_psa_attributes(const psa_key_attributes_t *key_
 		key_algorithm = PSA_ALG_AEAD_WITH_DEFAULT_LENGTH_TAG(key_algorithm);
 	}
 
+	key_type = psa_get_key_type(key_attr);
+
 	switch (key_algorithm) {
 #ifdef PSA_NEED_CRACEN_AES_KW
 	case PSA_ALG_KW:
 		metadata->algorithm = METADATA_ALG_KW;
-		if (psa_get_key_type(key_attr) != PSA_KEY_TYPE_AES) {
+		if (key_type != PSA_KEY_TYPE_AES) {
 			return PSA_ERROR_NOT_SUPPORTED;
 		}
 		break;
@@ -865,7 +954,7 @@ static psa_status_t convert_from_psa_attributes(const psa_key_attributes_t *key_
 #ifdef PSA_NEED_CRACEN_AES_KWP
 	case PSA_ALG_KWP:
 		metadata->algorithm = METADATA_ALG_KWP;
-		if (psa_get_key_type(key_attr) != PSA_KEY_TYPE_AES) {
+		if (key_type != PSA_KEY_TYPE_AES) {
 			return PSA_ERROR_NOT_SUPPORTED;
 		}
 		break;
@@ -873,7 +962,7 @@ static psa_status_t convert_from_psa_attributes(const psa_key_attributes_t *key_
 #ifdef PSA_NEED_CRACEN_STREAM_CIPHER_CHACHA20
 	case PSA_ALG_STREAM_CIPHER:
 		metadata->algorithm = METADATA_ALG_CHACHA20;
-		if (psa_get_key_type(key_attr) != PSA_KEY_TYPE_CHACHA20) {
+		if (key_type != PSA_KEY_TYPE_CHACHA20) {
 			return PSA_ERROR_NOT_SUPPORTED;
 		}
 		break;
@@ -881,7 +970,7 @@ static psa_status_t convert_from_psa_attributes(const psa_key_attributes_t *key_
 #ifdef PSA_NEED_CRACEN_CHACHA20_POLY1305
 	case PSA_ALG_CHACHA20_POLY1305:
 		metadata->algorithm = METADATA_ALG_CHACHA20_POLY1305;
-		if (psa_get_key_type(key_attr) != PSA_KEY_TYPE_CHACHA20) {
+		if (key_type != PSA_KEY_TYPE_CHACHA20) {
 			return PSA_ERROR_NOT_SUPPORTED;
 		}
 		break;
@@ -889,7 +978,7 @@ static psa_status_t convert_from_psa_attributes(const psa_key_attributes_t *key_
 #ifdef PSA_NEED_CRACEN_GCM_AES
 	case PSA_ALG_GCM:
 		metadata->algorithm = METADATA_ALG_AES_GCM;
-		if (psa_get_key_type(key_attr) != PSA_KEY_TYPE_AES) {
+		if (key_type != PSA_KEY_TYPE_AES) {
 			return PSA_ERROR_NOT_SUPPORTED;
 		}
 		break;
@@ -897,7 +986,7 @@ static psa_status_t convert_from_psa_attributes(const psa_key_attributes_t *key_
 #ifdef PSA_NEED_CRACEN_CCM_AES
 	case PSA_ALG_CCM:
 		metadata->algorithm = METADATA_ALG_AES_CCM;
-		if (psa_get_key_type(key_attr) != PSA_KEY_TYPE_AES) {
+		if (key_type != PSA_KEY_TYPE_AES) {
 			return PSA_ERROR_NOT_SUPPORTED;
 		}
 		break;
@@ -905,7 +994,7 @@ static psa_status_t convert_from_psa_attributes(const psa_key_attributes_t *key_
 #ifdef PSA_NEED_CRACEN_ECB_NO_PADDING_AES
 	case PSA_ALG_ECB_NO_PADDING:
 		metadata->algorithm = METADATA_ALG_AES_ECB;
-		if (psa_get_key_type(key_attr) != PSA_KEY_TYPE_AES) {
+		if (key_type != PSA_KEY_TYPE_AES) {
 			return PSA_ERROR_NOT_SUPPORTED;
 		}
 		break;
@@ -913,7 +1002,7 @@ static psa_status_t convert_from_psa_attributes(const psa_key_attributes_t *key_
 #ifdef PSA_NEED_CRACEN_CTR_AES
 	case PSA_ALG_CTR:
 		metadata->algorithm = METADATA_ALG_AES_CTR;
-		if (psa_get_key_type(key_attr) != PSA_KEY_TYPE_AES) {
+		if (key_type != PSA_KEY_TYPE_AES) {
 			return PSA_ERROR_NOT_SUPPORTED;
 		}
 		break;
@@ -921,7 +1010,7 @@ static psa_status_t convert_from_psa_attributes(const psa_key_attributes_t *key_
 #ifdef PSA_NEED_CRACEN_CBC_NO_PADDING_AES
 	case PSA_ALG_CBC_NO_PADDING:
 		metadata->algorithm = METADATA_ALG_AES_CBC;
-		if (psa_get_key_type(key_attr) != PSA_KEY_TYPE_AES) {
+		if (key_type != PSA_KEY_TYPE_AES) {
 			return PSA_ERROR_NOT_SUPPORTED;
 		}
 		break;
@@ -929,7 +1018,7 @@ static psa_status_t convert_from_psa_attributes(const psa_key_attributes_t *key_
 #ifdef PSA_NEED_CRACEN_SP800_108_COUNTER_CMAC
 	case PSA_ALG_SP800_108_COUNTER_CMAC:
 		metadata->algorithm = METADATA_ALG_SP800_108_COUNTER_CMAC;
-		if (psa_get_key_type(key_attr) != PSA_KEY_TYPE_AES) {
+		if (key_type != PSA_KEY_TYPE_AES) {
 			return PSA_ERROR_NOT_SUPPORTED;
 		}
 		break;
@@ -937,7 +1026,7 @@ static psa_status_t convert_from_psa_attributes(const psa_key_attributes_t *key_
 #ifdef PSA_NEED_CRACEN_CMAC
 	case PSA_ALG_CMAC:
 		metadata->algorithm = METADATA_ALG_CMAC;
-		if (psa_get_key_type(key_attr) != PSA_KEY_TYPE_AES) {
+		if (key_type != PSA_KEY_TYPE_AES) {
 			return PSA_ERROR_NOT_SUPPORTED;
 		}
 		break;
@@ -945,13 +1034,11 @@ static psa_status_t convert_from_psa_attributes(const psa_key_attributes_t *key_
 #endif /* PSA_NEED_CRACEN_CMAC */
 #ifdef PSA_NEED_CRACEN_ED25519PH
 	case PSA_ALG_ED25519PH:
-		if (PSA_KEY_TYPE_ECC_GET_FAMILY(psa_get_key_type(key_attr)) !=
-		    PSA_ECC_FAMILY_TWISTED_EDWARDS) {
+		if (PSA_KEY_TYPE_ECC_GET_FAMILY(key_type) != PSA_ECC_FAMILY_TWISTED_EDWARDS) {
 			return PSA_ERROR_NOT_SUPPORTED;
 		}
 		/* Don't support private keys that are only used for verify */
-		if (!can_sign(key_attr) &&
-		    PSA_KEY_TYPE_IS_ECC_KEY_PAIR(psa_get_key_type(key_attr))) {
+		if (!can_sign(key_attr) && PSA_KEY_TYPE_IS_ECC_KEY_PAIR(key_type)) {
 			return PSA_ERROR_NOT_SUPPORTED;
 		}
 		metadata->algorithm = METADATA_ALG_ED25519PH;
@@ -959,13 +1046,13 @@ static psa_status_t convert_from_psa_attributes(const psa_key_attributes_t *key_
 #endif /* PSA_NEED_CRACEN_ED25519PH */
 #ifdef PSA_NEED_CRACEN_PURE_EDDSA_TWISTED_EDWARDS
 	case PSA_ALG_PURE_EDDSA:
-		if (PSA_KEY_TYPE_ECC_GET_FAMILY(psa_get_key_type(key_attr)) !=
+		if (PSA_KEY_TYPE_ECC_GET_FAMILY(key_type) !=
 		    PSA_ECC_FAMILY_TWISTED_EDWARDS) {
 			return PSA_ERROR_NOT_SUPPORTED;
 		}
 		/* Don't support private keys that are only used for verify */
 		if (!can_sign(key_attr) &&
-		    PSA_KEY_TYPE_IS_ECC_KEY_PAIR(psa_get_key_type(key_attr))) {
+		    PSA_KEY_TYPE_IS_ECC_KEY_PAIR(key_type)) {
 			return PSA_ERROR_NOT_SUPPORTED;
 		}
 		metadata->algorithm = METADATA_ALG_ED25519;
@@ -975,14 +1062,14 @@ static psa_status_t convert_from_psa_attributes(const psa_key_attributes_t *key_
 	case PSA_ALG_ECDSA(PSA_ALG_ANY_HASH):
 	case PSA_ALG_ECDSA(PSA_ALG_SHA_256):
 	case PSA_ALG_ECDSA(PSA_ALG_SHA_384):
-		if (PSA_KEY_TYPE_ECC_GET_FAMILY(psa_get_key_type(key_attr)) !=
+		if (PSA_KEY_TYPE_ECC_GET_FAMILY(key_type) !=
 		    PSA_ECC_FAMILY_SECP_R1) {
 			return PSA_ERROR_NOT_SUPPORTED;
 		}
 
 		/* Don't support private keys that are only used for verify */
 		if (!can_sign(key_attr) &&
-		    PSA_KEY_TYPE_IS_ECC_KEY_PAIR(psa_get_key_type(key_attr))) {
+		    PSA_KEY_TYPE_IS_ECC_KEY_PAIR(key_type)) {
 			return PSA_ERROR_NOT_SUPPORTED;
 		}
 		metadata->algorithm = METADATA_ALG_ECDSA;
@@ -990,7 +1077,7 @@ static psa_status_t convert_from_psa_attributes(const psa_key_attributes_t *key_
 #endif /* PSA_NEED_CRACEN_ECDSA */
 #ifdef PSA_NEED_CRACEN_HMAC
 	case PSA_ALG_HMAC(PSA_ALG_SHA_256):
-		if (!can_sign(key_attr) && PSA_ALG_IS_HMAC(psa_get_key_type(key_attr))) {
+		if (!can_sign(key_attr) && PSA_ALG_IS_HMAC(key_type)) {
 			return PSA_ERROR_NOT_SUPPORTED;
 		}
 		metadata->algorithm = METADATA_ALG_HMAC;
@@ -999,10 +1086,8 @@ static psa_status_t convert_from_psa_attributes(const psa_key_attributes_t *key_
 #ifdef PSA_NEED_CRACEN_ECDH
 	case PSA_ALG_ECDH:
 		if (!can_derive(key_attr) ||
-		    (PSA_KEY_TYPE_ECC_GET_FAMILY(psa_get_key_type(key_attr)) !=
-			     PSA_ECC_FAMILY_SECP_R1 &&
-		     PSA_KEY_TYPE_ECC_GET_FAMILY(psa_get_key_type(key_attr)) !=
-			     PSA_ECC_FAMILY_MONTGOMERY)) {
+		    (PSA_KEY_TYPE_ECC_GET_FAMILY(key_type) != PSA_ECC_FAMILY_SECP_R1 &&
+		     PSA_KEY_TYPE_ECC_GET_FAMILY(key_type) != PSA_ECC_FAMILY_MONTGOMERY)) {
 			return PSA_ERROR_NOT_SUPPORTED;
 		}
 		metadata->algorithm = METADATA_ALG_ECDH;
@@ -1067,13 +1152,13 @@ static psa_status_t convert_from_psa_attributes(const psa_key_attributes_t *key_
 	switch (PSA_KEY_LIFETIME_GET_PERSISTENCE(psa_get_key_lifetime(key_attr))) {
 	case PSA_KEY_PERSISTENCE_READ_ONLY:
 	case CRACEN_KEY_PERSISTENCE_READ_ONLY:
-		metadata->rpolicy = LIB_KMU_REV_POLICY_LOCKED;
+		metadata->rpolicy = NRFX_KMU_RPOLICY_LOCKED;
 		break;
 	case PSA_KEY_PERSISTENCE_DEFAULT:
-		metadata->rpolicy = LIB_KMU_REV_POLICY_ROTATING;
+		metadata->rpolicy = NRFX_KMU_RPOLICY_ROTATING;
 		break;
 	case CRACEN_KEY_PERSISTENCE_REVOKABLE:
-		metadata->rpolicy = LIB_KMU_REV_POLICY_REVOKED;
+		metadata->rpolicy = NRFX_KMU_RPOLICY_REVOKED;
 		break;
 	default:
 		return PSA_ERROR_INVALID_ARGUMENT;
@@ -1178,11 +1263,22 @@ psa_status_t cracen_kmu_provision(const psa_key_attributes_t *key_attr, int slot
 
 	/* Verify that required slots are empty */
 	const size_t num_slots = DIV_ROUND_UP(key_buffer_size, CRACEN_KMU_SLOT_KEY_SIZE);
+	bool slots_empty;
+	bool slots_revoked;
 
-	for (size_t i = 0; i < num_slots; i++) {
-		if (!lib_kmu_is_slot_empty(slot_id + i)) {
-			return PSA_ERROR_ALREADY_EXISTS;
+	if (nrfx_kmu_key_slots_empty_check(slot_id, num_slots, &slots_empty) != 0) {
+		return PSA_ERROR_HARDWARE_FAILURE;
+	}
+
+	if (!slots_empty) {
+		if (nrfx_kmu_key_slots_revoked_check(slot_id, num_slots, &slots_revoked) != 0) {
+			return PSA_ERROR_HARDWARE_FAILURE;
 		}
+
+		if (slots_revoked) {
+			return PSA_ERROR_HARDWARE_FAILURE;
+		}
+		return PSA_ERROR_ALREADY_EXISTS;
 	}
 
 	if (num_slots > 1) {
@@ -1192,22 +1288,26 @@ psa_status_t cracen_kmu_provision(const psa_key_attributes_t *key_attr, int slot
 		}
 	}
 
-	struct kmu_src kmu_desc = {};
+	nrfx_kmu_key_slot_data_t key_slot_data = {};
 
 	for (size_t i = 0; i < num_slots; i++) {
-		kmu_desc.dest = (uint32_t)push_address + (CRACEN_KMU_SLOT_KEY_SIZE * i);
+		key_slot_data.keyslot_dest =
+			(uint32_t)push_address + (CRACEN_KMU_SLOT_KEY_SIZE * i);
+
 		if (i == 0) {
-			memcpy(&kmu_desc.metadata, &metadata, sizeof(kmu_desc.metadata));
+			memcpy(&key_slot_data.metadata.metadata, &metadata,
+			       sizeof(key_slot_data.metadata.metadata));
 		} else {
-			kmu_desc.metadata = SECONDARY_SLOT_METADATA_VALUE;
+			key_slot_data.metadata.metadata = SECONDARY_SLOT_METADATA_VALUE;
 		}
-		kmu_desc.rpolicy = metadata.rpolicy;
-		memcpy(kmu_desc.value, key_buffer + CRACEN_KMU_SLOT_KEY_SIZE * i,
+
+		key_slot_data.revoke_policy = metadata.rpolicy;
+		memcpy(key_slot_data.keyslot_value, key_buffer + CRACEN_KMU_SLOT_KEY_SIZE * i,
 		       CRACEN_KMU_SLOT_KEY_SIZE);
 
-		int st = lib_kmu_provision_slot(slot_id + i, &kmu_desc);
+		int kmu_status = cracen_kmu_key_slot_provision(&key_slot_data, slot_id + i);
 
-		if (st) {
+		if (kmu_status != 0) {
 			/* We've already verified that this slot empty, so it should not fail. */
 			psa_status = PSA_ERROR_HARDWARE_FAILURE;
 
@@ -1215,7 +1315,7 @@ psa_status_t cracen_kmu_provision(const psa_key_attributes_t *key_attr, int slot
 			break;
 		}
 
-		safe_memzero(&kmu_desc, sizeof(kmu_desc));
+		safe_memzero(&key_slot_data, sizeof(nrfx_kmu_key_slot_data_t));
 	}
 
 	if (num_slots > 1 && psa_status == PSA_SUCCESS) {
@@ -1239,13 +1339,13 @@ psa_status_t cracen_kmu_get_key_slot(mbedtls_svc_key_id_t key_id, psa_key_lifeti
 	}
 
 	switch (metadata.rpolicy) {
-	case LIB_KMU_REV_POLICY_ROTATING:
+	case NRFX_KMU_RPOLICY_ROTATING:
 		persistence = PSA_KEY_PERSISTENCE_DEFAULT;
 		break;
-	case LIB_KMU_REV_POLICY_REVOKED:
+	case NRFX_KMU_RPOLICY_REVOKED:
 		persistence = CRACEN_KEY_PERSISTENCE_REVOKABLE;
 		break;
-	case LIB_KMU_REV_POLICY_LOCKED:
+	case NRFX_KMU_RPOLICY_LOCKED:
 		persistence = CRACEN_KEY_PERSISTENCE_READ_ONLY;
 		break;
 	default:
@@ -1263,13 +1363,22 @@ psa_status_t cracen_kmu_block(const psa_key_attributes_t *key_attr)
 {
 	psa_status_t psa_status;
 	unsigned int slot_id, slot_count;
+	int kmu_status;
 
 	psa_status = get_kmu_slot_id_and_count(key_attr, &slot_id, &slot_count);
 	if (psa_status != PSA_SUCCESS) {
 		return psa_status;
 	}
 
-	if (lib_kmu_block_slot_range(slot_id, slot_count) != LIB_KMU_SUCCESS) {
+#if defined(NRF_KMU_HAS_PUSH_BLOCK)
+	kmu_status = nrfx_kmu_key_slots_push_block(slot_id, slot_count);
+#elif defined(NRF_KMU_HAS_BLOCK)
+	kmu_status = nrfx_kmu_key_slots_block(slot_id, slot_count);
+#else
+#error "KMU block functionality is missing"
+#endif
+
+	if (kmu_status != 0) {
 		return PSA_ERROR_GENERIC_ERROR;
 	}
 	return PSA_SUCCESS;
@@ -1304,6 +1413,7 @@ psa_status_t cracen_kmu_get_builtin_key(psa_drv_slot_number_t slot_number,
 {
 	kmu_metadata metadata;
 	psa_status_t psa_status;
+	psa_key_type_t key_type;
 	size_t opaque_key_size;
 
 	psa_status = read_primary_slot_metadata(slot_number, &metadata);
@@ -1338,9 +1448,11 @@ psa_status_t cracen_kmu_get_builtin_key(psa_drv_slot_number_t slot_number,
 		return psa_status;
 	}
 
+	key_type = psa_get_key_type(attributes);
+
 	if (key_buffer_size >= opaque_key_size) {
-		if (psa_get_key_type(attributes) ==
-		    PSA_KEY_TYPE_ECC_PUBLIC_KEY(PSA_ECC_FAMILY_SECP_R1)) {
+		if (IS_ENABLED(PSA_NEED_CRACEN_ECDSA) &&
+		    key_type == PSA_KEY_TYPE_ECC_PUBLIC_KEY(PSA_ECC_FAMILY_SECP_R1)) {
 			*key_buffer = CRACEN_ECC_PUBKEY_UNCOMPRESSED;
 			key_buffer++;
 			key_buffer_size--;
@@ -1363,12 +1475,13 @@ psa_status_t cracen_kmu_get_builtin_key(psa_drv_slot_number_t slot_number,
 	}
 
 	/* ECC keys are getting loading into the key buffer like volatile keys */
-	if (PSA_KEY_TYPE_IS_ECC(psa_get_key_type(attributes))) {
+	if (IS_ENABLED(PSA_NEED_CRACEN_ASYMMETRIC_SIGNATURE_ANY_ECC) &&
+	    PSA_KEY_TYPE_IS_ECC(key_type)) {
 		return push_kmu_key_to_ram(key_buffer, key_buffer_size);
 	}
 
 	/* HMAC keys are getting loading into the key buffer like volatile keys */
-	if (psa_get_key_type(attributes) == PSA_KEY_TYPE_HMAC) {
+	if (IS_ENABLED(PSA_NEED_CRACEN_HMAC) && key_type == PSA_KEY_TYPE_HMAC) {
 		return push_kmu_key_to_ram(key_buffer, key_buffer_size);
 	}
 

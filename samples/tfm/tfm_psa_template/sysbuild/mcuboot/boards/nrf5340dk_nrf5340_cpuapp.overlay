@@ -4,8 +4,76 @@
  * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
  */
 
+/delete-node/ &boot_partition;
+/delete-node/ &slot0_partition;
+/delete-node/ &slot1_partition;
+/delete-node/ &storage_partition;
+
 / {
 	chosen {
-		nordic,pm-ext-flash = &mx25r64;
+		zephyr,code-partition = &s0_partition;
+	};
+};
+
+/* Keep in sync with boards/nrf5340dk_nrf5340_cpuapp_ns.overlay. */
+&flash0 {
+	partitions {
+		b0_partition: partition@0 {
+			compatible = "zephyr,mapped-partition";
+			label = "b0";
+			reg = <0x0 0x8000>;
+		};
+
+		s0_partition: partition@8000 {
+			compatible = "zephyr,mapped-partition";
+			label = "mcuboot";
+			reg = <0x8000 0x10000>;
+		};
+
+		s1_partition: partition@18000 {
+			compatible = "zephyr,mapped-partition";
+			label = "mcuboot_s1";
+			reg = <0x18000 0x10000>;
+		};
+
+		slot0_partition: partition@28000 {
+			compatible = "zephyr,mapped-partition";
+			label = "image-0";
+			reg = <0x28000 0x68000>;
+		};
+
+		slot1_partition: partition@90000 {
+			compatible = "zephyr,mapped-partition";
+			label = "image-1";
+			reg = <0x90000 0x68000>;
+		};
+
+		storage_partition: partition@f8000 {
+			compatible = "zephyr,mapped-partition";
+			label = "storage";
+			reg = <0xf8000 0x8000>;
+		};
+	};
+};
+
+/* Must match sram0_dfu_shared in the cpuapp_ns overlay. */
+/delete-node/ &sram0_dfu_shared;
+
+&sram0_ns {
+	sram0_dfu_shared: sram@2e000 {
+		reg = <0x2e000 0x2000>;
+	};
+};
+
+&mx25r64 {
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		slot3_partition: partition@0 {
+			label = "image-3";
+			reg = <0x0 DT_SIZE_K(256)>;
+		};
 	};
 };

@@ -129,13 +129,16 @@ def add_google_analytics(app: Sphinx, options: dict) -> None:
         options: HTML theme options
     """
 
-    app.add_js_file("js/gtm-insert.js")
+    # The Cookie Information consent script must load before Google Tag Manager
+    # so that it can register the default consent state for Google Consent Mode
+    # v2 (data-gcm-version) before any tags fire.
     app.add_js_file(
         "https://policy.app.cookieinformation.com/uc.js",
         id="CookieConsent",
         type="text/javascript",
-        **{"data-culture": "EN"},
+        **{"data-culture": "EN", "data-gcm-version": "2.0"},
     )
+    app.add_js_file("js/gtm-insert.js")
 
     options["add_gtm"] = True
     options["gtm_id"] = "GTM-WF4CVFX"
@@ -143,9 +146,16 @@ def add_google_analytics(app: Sphinx, options: dict) -> None:
 def add_kapa_search(app: Sphinx) -> None:
     """Add Kapa.ai search widget to a docset.
 
+    The widget is only added when the "kapa" tag is set, i.e. when
+    sphinx-build is invoked with ``-t kapa``. This is meant to be enabled at
+    CI level for "latest" builds only.
+
     Args:
         app: Sphinx instance.
     """
+
+    if not app.tags.has("kapa"):
+        return
 
     app.add_css_file("css/kapa-widget.css")
     app.add_js_file("js/kapa-widget.js")

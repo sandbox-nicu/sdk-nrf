@@ -9,6 +9,26 @@ from typing import Any
 from west.commands import CommandError, WestCommand
 
 
+def find_commit_in_log(commit: dict, commit_log: list[dict]) -> dict | None:
+    for c in commit_log:
+        if commit['subject'] != c['subject']:
+            continue
+
+        c_files = {(f['file'], f['lines']) for f in c['files']}
+        commit_files = {(f['file'], f['lines']) for f in commit['files']}
+
+        if c_files != commit_files:
+            continue
+
+        return c
+
+    return None
+
+
+def commit_is_in_log(commit: dict, commit_log: list[dict]) -> bool:
+    return find_commit_in_log(commit, commit_log) is not None
+
+
 class Repo:
     def __init__(
         self,
@@ -72,15 +92,22 @@ class Repo:
         pr_head_sha = self._get_remote_head_sha_(self.upstream_url, f'pull/{pr_number}/head')
         pr_base_sha = self._get_merge_base_(self.upstream_head_sha, pr_head_sha)
 
-        if pr_base_sha not in self.upstream_log_sha_map:
-            raise CommandError(f'PR number {pr_number} is from before latest upmerge')
-
         pr_log = self._parse_commit_range_(pr_base_sha, pr_head_sha)
 
         # Track which PR the commits came from. Used to amend the commit message when cherry
         # picked.
         for commit in pr_log:
             commit['pr-number'] = pr_number
+
+        if pr_base_sha in self.upstream_log_sha_map:
+            # PR merge base is after latest upmerge.
+            return pr_log
+
+        # PR merge base is from before latest upmerge. Validate PR has not been merged already.
+        old_upstream_log = self._parse_commit_range_(pr_base_sha, self.merge_base_sha)
+        for commit in pr_log:
+            if commit_is_in_log(commit, old_upstream_log):
+                raise CommandError(f'PR number {pr_number} was merged before latest upmerge')
 
         return pr_log
 
@@ -313,6 +340,7 @@ class FakeRepo:
         #   03 upstream_pr_2
         #   04 branch
         #   05 upstream_pr_0
+        #   06 upstream_pr_3
         self.logs = {
             'upstream': [
                 {
@@ -427,6 +455,21 @@ class FakeRepo:
                 },
             ],
             'downstream': [
+                {
+                    # Conflicts with PR3, file e touched only by downstream
+                    'sha': '0104000000000000000000000000000000000000',
+                    'subject': 'file e touched only by downstream',
+                    'sauce': 'nrf noup',
+                    'files': [
+                        {
+                            'file': 'e',
+                            'lines': 5,
+                            'conflicts': [
+                                '0600000000000000000000000000000000000000',
+                            ],
+                        },
+                    ],
+                },
                 {
                     # Pair with 0102. Filtered with it by _filter_reverted_commits_.
                     'sha': '0103000000000000000000000000000000000000',
@@ -578,6 +621,20 @@ class FakeRepo:
                             'depends': [
                                 '0003000000000000000000000000000000000000',
                             ],
+                        },
+                    ],
+                },
+            ],
+            'upstream_pr_3': [
+                {
+                    # PR3. Conflicts with file e touched only by downstream.
+                    'sha': '0600000000000000000000000000000000000000',
+                    'pr-number': 3,
+                    'subject': 'conflict with file e',
+                    'files': [
+                        {
+                            'file': 'e',
+                            'lines': 6,
                         },
                     ],
                 },
@@ -1102,31 +1159,13 @@ class NcsCherryPick(WestCommand):
 
         return [commit for commit in commits if commit['sha'] not in removed]
 
-    def _find_commit_in_log_(self, commit: dict, commit_log: list[dict]) -> dict | None:
-        for c in commit_log:
-            if commit['subject'] != c['subject']:
-                continue
-
-            c_files = {(f['file'], f['lines']) for f in c['files']}
-            commit_files = {(f['file'], f['lines']) for f in commit['files']}
-
-            if c_files != commit_files:
-                continue
-
-            return c
-
-        return None
-
-    def _commit_is_in_log_(self, commit: dict, commit_log: list[dict]) -> bool:
-        return self._find_commit_in_log_(commit, commit_log) is not None
-
     def _promote_fromlists_to_fromtrees_(
         self, fromlist_log: list[dict], fromtree_log: list[dict], upstream_log: list[dict]
     ) -> tuple[list[dict], list[dict]]:
         remaining_fromlist_log = []
 
         for commit in fromlist_log:
-            similar_commit = self._find_commit_in_log_(commit, upstream_log)
+            similar_commit = find_commit_in_log(commit, upstream_log)
             if similar_commit is None:
                 remaining_fromlist_log.append(commit)
             else:
@@ -1137,7 +1176,7 @@ class NcsCherryPick(WestCommand):
     def _filter_already_present_fromtrees_(
         self, fromtree_log: list[dict], downstream_log: list[dict]
     ) -> list[dict]:
-        return [c for c in fromtree_log if self._find_commit_in_log_(c, downstream_log) is None]
+        return [c for c in fromtree_log if not commit_is_in_log(c, downstream_log)]
 
     def _sync_downstream_fromlists_(self, downstream_log: list[dict], upstream_log: list[dict]):
         for commit in downstream_log:
@@ -1145,7 +1184,7 @@ class NcsCherryPick(WestCommand):
                 # Only fromlists can get out of sync.
                 continue
 
-            similar_commit = self._find_commit_in_log_(commit, upstream_log)
+            similar_commit = find_commit_in_log(commit, upstream_log)
             if similar_commit is not None:
                 # Fromlist has been merged and is now a fromtree. Update to fromtree.
                 commit['sauce'] = 'nrf fromtree'
@@ -1167,7 +1206,7 @@ class NcsCherryPick(WestCommand):
         touching_shas = []
         touching_commits = []
         for p in unmerged_paths:
-            cs = self.downstream_file_index[p]
+            cs = self.downstream_file_index.get(p, [])
             for c in cs:
                 if c['sha'] in touching_shas or c['sha'] in revert_shas:
                     continue
@@ -1177,8 +1216,11 @@ class NcsCherryPick(WestCommand):
 
         # Only revert touching commits which are newer than the conflicting commit since it
         # can't conflict with a commit merged before it. Touching commits and conflicting
-        # commit are both from the same branch so we can compare the merge dates.
-        touching_commits = [c for c in touching_commits if c['order'] < commit['order']]
+        # commit are both from the same branch so we can compare the merge dates. Note that
+        # commits from PRs are on top of upstream so they are always older than any touching
+        # commit.
+        if 'pr-number' not in commit:
+            touching_commits = [c for c in touching_commits if c['order'] < commit['order']]
 
         assert touching_commits, 'Failed to resolve revert conflict'
 
@@ -1226,7 +1268,7 @@ class NcsCherryPick(WestCommand):
         touching_shas = []
         touching_commits = []
         for p in unmerged_paths:
-            cs = self.upstream_file_index[p]
+            cs = self.upstream_file_index.get(p, [])
             for c in cs:
                 if c['sha'] in touching_shas or c['sha'] in fromtree_shas:
                     continue
@@ -1236,7 +1278,7 @@ class NcsCherryPick(WestCommand):
 
         # Only cherry pick commits which are not already cherry picked downstream
         touching_commits = [
-            c for c in touching_commits if not self._commit_is_in_log_(c, self.downstream_log)
+            c for c in touching_commits if not commit_is_in_log(c, self.downstream_log)
         ]
 
         # Only cherry pick touching commits which are older than the conflicting commit since it

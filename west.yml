@@ -67,7 +67,7 @@ manifest:
     # https://developer.nordicsemi.com/nRF_Connect_SDK/doc/latest/zephyr/guides/modules.html
     - name: zephyr
       repo-path: sdk-zephyr
-      revision: db7fef406c7cd80a5ca27148407323b5e185a1fc
+      revision: da7afd8e63c41a505462d7eb9bfdbce2a4d903cc
       import:
         # In addition to the zephyr repository itself, NCS also
         # imports the contents of zephyr/west.yml at the above
@@ -149,11 +149,11 @@ manifest:
     - name: oberon-psa-crypto
       path: modules/crypto/oberon-psa-crypto
       repo-path: sdk-oberon-psa-crypto
-      revision: 1b16da979e813805dd5eb5ad77e0d56be9ab299c
+      revision: 87917371cc6f3883dbdf0c7751c48a358ab8920a
     - name: nrfxlib
       repo-path: sdk-nrfxlib
       path: nrfxlib
-      revision: e7b346ce24268dc69d08888e586e42a0162a22ea
+      revision: f54b38275fd6267de698b47fd2bd3e7c34d5905e
     - name: trusted-firmware-m
       repo-path: sdk-trusted-firmware-m
       path: modules/tee/tf-m/trusted-firmware-m
@@ -165,7 +165,7 @@ manifest:
     - name: matter
       repo-path: sdk-connectedhomeip
       path: modules/lib/matter
-      revision: 494ce1882ddfeb64cf23a462c1265f95aba93ed4
+      revision: eb8de081315bfea90657b0009846c72576607294
       west-commands: scripts/west/west-commands.yml
       submodules:
         - name: nlio
@@ -191,7 +191,7 @@ manifest:
       # Only for internal Nordic development
       repo-path: dragoon.git
       remote: dragoon
-      revision: ffdf237cc682d8cd691b5dab2003bb5d6a16de93
+      revision: 579908dcb66b1d7c0907910908ca2bbeaa9c8c68
       groups:
         - dragoon
     - name: cjson
@@ -205,7 +205,7 @@ manifest:
           compare-by-default: false
     - name: find-my
       repo-path: sdk-find-my
-      revision: 85f9b6b0ae1d4ebe7036187211269bb13da70198
+      revision: 835010dc677002139d02fbdacf31274f0b65e064
       groups:
         - find-my
     - name: azure-sdk-for-c
@@ -227,7 +227,7 @@ manifest:
           upstream-sha: 1be6ca7253133a21a1e9fe0fbb4656e17d63a936
           compare-by-default: false
     - name: libmodem
-      revision: c2d94ec78bcbce67849004c6a766a03bb4f31d2a
+      revision: 9b2d0bb28af593c357d9dc8bfb10f80a08f57677
       groups:
         - libmodem
     - name: openthread
@@ -246,7 +246,7 @@ manifest:
       groups:
         - doc-internal
     - name: nrf_wifi
-      revision: d28d7e972a208f5007f745bd0a116d4cde3c4100
+      revision: 5046744cb4c9640eb8b11cb92f1ea0b9554c20cf
       path: modules/lib/nrf_wifi
 
     # Other third-party repositories.
@@ -257,7 +257,7 @@ manifest:
       remote: throwtheswitch
     - name: memfault-firmware-sdk
       path: modules/lib/memfault-firmware-sdk
-      revision: 1.38.0
+      revision: 1.40.0
       remote: memfault
     - name: bsim
       repo-path: bsim_west
@@ -288,7 +288,7 @@ manifest:
     - name: hostap
       repo-path: sdk-hostap
       path: modules/lib/hostap
-      revision: a50c3c2c78eb3ed9709803eb7479d3df33d7c1bb
+      revision: dc22e8cf8dd03c8ff2bdde68002a4496525f6eb2
   # West-related configuration for the nrf repository.
   self:
     # This repository should be cloned to ncs/nrf.
