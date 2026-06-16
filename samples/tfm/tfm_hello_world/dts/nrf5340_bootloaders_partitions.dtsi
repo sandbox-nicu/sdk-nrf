@@ -1,0 +1,59 @@
+/*
+ * Copyright (c) 2026 Nordic Semiconductor ASA
+ *
+ * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+ *
+ * Shared flash partition layout for the FILE_SUFFIX=bootloaders variant of
+ * tfm_hello_world on nRF5340. Included from:
+ *   - boards/nrf5340dk_nrf5340_cpuapp_ns_bootloaders.overlay (NS application)
+ *   - sysbuild/mcuboot/boards/nrf5340dk_nrf5340_cpuapp.overlay (MCUboot image)
+ *   - sysbuild/b0/boards/nrf5340dk_nrf5340_cpuapp.overlay (B0 image)
+ *
+ * s0/s1 must be aligned to the SPU flash block size (0x4000) so that
+ * MCUboot's fprotect_area() over (s0 + s1) succeeds.
+ */
+
+/delete-node/ &boot_partition;
+/delete-node/ &slot0_partition;
+/delete-node/ &slot1_partition;
+/delete-node/ &storage_partition;
+
+&flash0 {
+	partitions {
+		b0_partition: partition@0 {
+			compatible = "zephyr,mapped-partition";
+			label = "b0";
+			reg = <0x0 0x8000>;
+		};
+
+		s0_partition: partition@8000 {
+			compatible = "zephyr,mapped-partition";
+			label = "mcuboot";
+			reg = <0x8000 0x10000>;
+		};
+
+		s1_partition: partition@18000 {
+			compatible = "zephyr,mapped-partition";
+			label = "mcuboot_s1";
+			reg = <0x18000 0x10000>;
+		};
+
+		slot0_partition: partition@28000 {
+			compatible = "zephyr,mapped-partition";
+			label = "image-0";
+			reg = <0x28000 0x68000>;
+		};
+
+		slot1_partition: partition@90000 {
+			compatible = "zephyr,mapped-partition";
+			label = "image-1";
+			reg = <0x90000 0x68000>;
+		};
+
+		storage_partition: partition@f8000 {
+			compatible = "zephyr,mapped-partition";
+			label = "storage";
+			reg = <0xf8000 0x8000>;
+		};
+	};
+};

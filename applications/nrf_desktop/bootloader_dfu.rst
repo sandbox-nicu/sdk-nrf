@@ -67,7 +67,7 @@ The nRF Desktop application can use one of the following bootloaders:
     Make sure that you use your own private key for the release version of the devices.
     Do not use the debug key for production.
 
-If your configuration enables the bootloader, make sure to define a static non-volatile memory layout in the Partition Manager.
+If your configuration enables the bootloader, make sure to define the memory layout through DTS configuration.
 See :ref:`nrf_desktop_memory_layout` for details.
 
 Configuring the B0 bootloader
@@ -210,7 +210,7 @@ As an example, the nRF Desktop application uses the RAM load mode for the nRF54L
 To set the MCUboot mode of operations to the RAM load mode, enable the :kconfig:option:`SB_CONFIG_MCUBOOT_MODE_RAM_LOAD` Kconfig option in the sysbuild configuration.
 
 To support the RAM load mode, you must use DTS as the partitioning method, as the Partition Manager (PM) is not supported in this mode.
-To satisfy this requirement, disable explicitly the :kconfig:option:`SB_CONFIG_PARTITION_MANAGER` Kconfig option in your sysbuild configuration.
+To satisfy this requirement, ensure that the :kconfig:option:`SB_CONFIG_PARTITION_MANAGER` Kconfig option is disabled in your sysbuild configuration.
 Additionally, you must define the custom memory layout for the RAM in your target board configuration.
 Your RAM layout must define the following DTS child nodes as part of the ``cpuapp_sram`` DTS node in the address order listed below:
 
@@ -251,11 +251,11 @@ For an example of the retention partition definition, see the :file:`nrf/applica
 You must also assign the retention partition to the chosen DTS node ``zephyr,bootloader-info`` in both the application image configuration and the MCUboot image configuration.
 
 .. note::
-   If your board target uses the Key Management Unit (KMU) feature (:kconfig:option:`CONFIG_CRACEN_LIB_KMU`), you must additionally define the ``nrf_kmu_reserved_push_area`` DTS node in your custom memory layout.
+   If your board target uses the Key Management Unit (KMU) feature (:kconfig:option:`CONFIG_CRACEN_KMU`), you must additionally define the ``nrf_kmu_reserved_push_area`` DTS node in your custom memory layout.
    Place this RAM section at the very beginning of the physical RAM due to the dependency on the ``nrfutil device`` tool and its KMU provisioning functionality.
    For an example of the ``nrf_kmu_reserved_push_area`` DTS node definition, see the :file:`nrf/applications/nrf_desktop/configuration/nrf54lm20dk_nrf54lm20a_cpuapp/memory_map_ram_load.dtsi` file.
 
-   The KMU feature (:kconfig:option:`CONFIG_CRACEN_LIB_KMU`) is enabled by default for the nRF54L series.
+   The KMU feature (:kconfig:option:`CONFIG_CRACEN_KMU`) is enabled by default for the nRF54L Series devices.
 
 .. note::
    The RAM load mode of the MCUboot bootloader is not yet integrated in the :ref:`nrf_desktop_dfu_mcumgr`.
