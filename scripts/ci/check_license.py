@@ -80,7 +80,7 @@ def parse_args():
     parser.add_argument('--github', action='store_true',
                         help='Add GitHub Actions Workflow commands to the stdout.')
     parser.add_argument('-m', '--manifest', default='west.yml',
-                        help='Path to the manifest file relative to the repository, default is west.yml',)
+                        help='Manifest file relative to the repository, default is west.yml',)
     return parser.parse_args()
 
 
