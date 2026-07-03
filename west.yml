@@ -132,7 +132,7 @@ manifest:
     - name: mcuboot
       remote: fork_mcuboot
       repo-path: sdk-mcuboot
-      revision: b39452e9c7e89faa4e7d9299c6210cf31c78522f
+      revision: 5ef6bfc0b7578f5b6b7b35942c2d404cc665cbd4
       path: bootloader/mcuboot
     - name: qcbor
       repo-path: sdk-qcbor
