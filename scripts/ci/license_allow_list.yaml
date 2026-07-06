@@ -19,11 +19,11 @@
 exclude:
   directories: []
     - nrfxlib
-    # - modules/crypto/mbedtls
+    - modules/crypto/mbedtls
   files: []
-    # - nrfxlib/README.md
+    - modules/crypto/oberon-psa-crypto/a_new_file.c
   patterns: []
-    # - '\.min\.js$'
+    - '^modules/crypto/oberon-psa-crypto/.*\.c$'
 
 # Nordic 5-Clause is always allowed.
 LicenseRef-Nordic-5-Clause: ".*"
