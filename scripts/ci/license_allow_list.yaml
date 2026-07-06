@@ -1,4 +1,4 @@
-# List of licenses allowed by the "license_check.py" script.
+# List of licenses allowed by the "check_license.py" script.
 # Key is a license identifier, value is a regular expression (see Python's
 # re.search) that matches the files that are allowed to have the license.
 # The value can be multiline string. Each line is a regexp that can optionally
@@ -8,6 +8,22 @@
 # including no license.
 # You can add a '-' character to the beginning of the license identifier to
 # allow specific license, but using it will generate a warning.
+
+# Files matching the special key "exclude" are not checked at all.
+# directories: paths relative to the west workspace; the directory and
+#              everything below it is excluded. Use the module "path" from
+#              west.yml to exclude an entire module repository.
+#   files:     exact file paths relative to the west workspace.
+#   patterns:  Python regular expressions (see re.search) matched against
+#              the workspace relative file path.
+exclude:
+  directories: []
+    - nrfxlib
+    # - modules/crypto/mbedtls
+  files: []
+    # - nrfxlib/README.md
+  patterns: []
+    # - '\.min\.js$'
 
 # Nordic 5-Clause is always allowed.
 LicenseRef-Nordic-5-Clause: ".*"
