@@ -21,7 +21,7 @@ exclude:
     - nrfxlib
     - modules/crypto/mbedtls
   files: []
-    - modules/crypto/oberon-psa-crypto/a_new_file.c
+    - modules/crypto/oberon-psa-crypto/a_new_file.h
   patterns: []
     - '^modules/crypto/oberon-psa-crypto/.*\.c$'
 
