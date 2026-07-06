@@ -17,12 +17,12 @@
 #   patterns:  Python regular expressions (see re.search) matched against
 #              the workspace relative file path.
 exclude:
-  directories: []
+  directories:
     - nrfxlib
     - modules/crypto/mbedtls
-  files: []
+  files:
     - modules/crypto/oberon-psa-crypto/a_new_file.h
-  patterns: []
+  patterns:
     - '^modules/crypto/oberon-psa-crypto/.*\.c$'
 
 # Nordic 5-Clause is always allowed.
