@@ -121,13 +121,44 @@ class FileLicenseChecker:
     '''Class that checks if a license is allowed for a file.'''
 
     allow_list: 'dict[str, list[tuple[re.Pattern, bool]]]'
+    exclude_dirs: 'list[str]'
+    exclude_files: 'set[str]'
+    exclude_patterns: 'list[re.Pattern]'
 
     def __init__(self, allow_list_file: Path):
         with open(allow_list_file) as fd:
             data = yaml.safe_load(fd)
+        self.parse_exclude(data.pop('exclude', None))
         self.allow_list = {}
         for key in data:
             self.allow_list[key.upper()] = self.parse_re(data[key])
+
+    def parse_exclude(self, exclude: 'dict|None'):
+        '''Parse the "exclude" section of the allow list file.'''
+        exclude = exclude or {}
+        unknown = set(exclude.keys()) - {'directories', 'files', 'patterns'}
+        if unknown:
+            raise ValueError('Unknown keys in the allow list "exclude" section: '
+                             + ', '.join(sorted(unknown)))
+        self.exclude_dirs = [str(d).replace('\\', '/').strip('/')
+                             for d in exclude.get('directories') or []]
+        self.exclude_files = {str(f).replace('\\', '/').lstrip('/')
+                              for f in exclude.get('files') or []}
+        self.exclude_patterns = [re.compile(p) for p in exclude.get('patterns') or []]
+
+    def is_excluded_dir(self, path: 'str|Path') -> bool:
+        '''Check if a directory relative to west workspace is entirely excluded.'''
+        path = str(path).replace('\\', '/').strip('/')
+        return any(path == d or path.startswith(d + '/') for d in self.exclude_dirs)
+
+    def is_excluded(self, file_path: 'str|Path') -> bool:
+        '''Check if a file is excluded from the check. Relative to west workspace.'''
+        file_str = str(file_path).replace('\\', '/').lstrip('/')
+        if file_str in self.exclude_files:
+            return True
+        if self.is_excluded_dir(file_str):
+            return True
+        return any(pattern.search(file_str) for pattern in self.exclude_patterns)
 
     @staticmethod
     def parse_re(re_str: str) -> 'list[tuple[re.Pattern, bool]]':
@@ -364,6 +395,9 @@ class PatchLicenseChecker:
         files = []
         for name, _ in sorted(updated):
             project = new_projects[name]
+            if self.license_checker.is_excluded_dir(project.path):
+                print(f'Updated project "{name}": excluded by the allow list.')
+                continue
             old_rev = old_projects[name].revision
             new_rev = project.revision
             print(
@@ -373,20 +407,26 @@ class PatchLicenseChecker:
             files += self.added_files(project, old_rev, new_rev)
         for name, _ in sorted(added):
             project = new_projects[name]
+            if self.license_checker.is_excluded_dir(project.path):
+                print(f'Added project "{name}": excluded by the allow list.')
+                continue
             print(f'Added project "{name}": collecting the entire tree at {project.revision[:12]}')
             files += self.all_files(project, project.revision)
         return [Path(f) for f in files]
 
     def skip_files(self, files: 'list[Path]') -> 'list[Path]':
         '''
-        Remove files from the list, because they do not exist, or they can have any license.
-        A new list is returned.
+        Remove files from the list, because they are excluded from the check, they do not exist,
+        or they can have any license. A new list is returned.
         '''
         new_list = []
+        excluded_count = 0
         for file_name in files:
-            if not (self.west_workspace / file_name).exists():
+            if self.license_checker.is_excluded(file_name):
+                excluded_count += 1
+            elif not (self.west_workspace / file_name).exists():
                 self.report('skip', SKIP_MISSING_FILE_TEXT, file_name)
-            if not (self.west_workspace / file_name).is_file():
+            elif not (self.west_workspace / file_name).is_file():
                 self.report('skip', SKIP_DIRECTORY_TEXT, file_name)
             elif is_external_license_file(file_name):
                 self.report('skip', SKIP_EXTERNAL_LICENSE_TEXT, file_name)
@@ -394,6 +434,9 @@ class PatchLicenseChecker:
                 self.report('skip', ANY_LICENSE_ALLOWED, file_name)
             else:
                 new_list.append(file_name)
+        if excluded_count:
+            print(f'Excluded {excluded_count} file(s) matching the "exclude" section of the '
+                  'allow list.')
         return new_list
 
     def detect_licenses(self, files: 'list[Path]') -> 'list[dict]':
@@ -485,3 +528,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
