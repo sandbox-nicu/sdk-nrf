@@ -18,7 +18,7 @@
 #              the workspace relative file path.
 exclude:
   directories:
-    - nrfxlib
+    - nrfxlib/blocked_dir
     - modules/crypto/mbedtls
   files:
     - modules/crypto/oberon-psa-crypto/a_new_file.h
