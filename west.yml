@@ -162,7 +162,7 @@ manifest:
       remote: fork_nrfxlib
       repo-path: sdk-nrfxlib
       path: nrfxlib
-      revision: f54b38275fd6267de698b47fd2bd3e7c34d5905e
+      revision: f5138a8a75f9ebf41e83ecf5016e1a32176192e8
     - name: trusted-firmware-m
       repo-path: sdk-trusted-firmware-m
       path: modules/tee/tf-m/trusted-firmware-m
