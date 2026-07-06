@@ -18,6 +18,12 @@ manifest:
   remotes:
     # nRF Connect SDK GitHub organization.
     # NCS repositories are hosted here.
+    - name: fork_mbedtls
+      url-base: https://github.com/sandbox-nicu
+    - name: fork_oberon
+      url-base: https://github.com/sandbox-nicu
+    - name: fork_nrfxlib
+      url-base: https://github.com/sandbox-nicu    
     - name: fork_mcuboot
       url-base: https://github.com/sandbox-nicu
     - name: ncs
@@ -143,14 +149,17 @@ manifest:
       path: modules/tee/tf-m/t_cose
       revision: 024c4298f84a82409e0ac0e1d5c2e8ee22cca901
     - name: mbedtls
+      remote: fork_mbedtls
       path: modules/crypto/mbedtls
       repo-path: sdk-mbedtls
       revision: 5b7ca76723b3aa77a9ab066e552fe0dca4975f45
     - name: oberon-psa-crypto
+      remote: fork_oberon
       path: modules/crypto/oberon-psa-crypto
       repo-path: sdk-oberon-psa-crypto
       revision: 87917371cc6f3883dbdf0c7751c48a358ab8920a
     - name: nrfxlib
+      remote: fork_nrfxlib
       repo-path: sdk-nrfxlib
       path: nrfxlib
       revision: f54b38275fd6267de698b47fd2bd3e7c34d5905e
