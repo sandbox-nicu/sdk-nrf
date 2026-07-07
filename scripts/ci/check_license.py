@@ -209,10 +209,17 @@ class PatchLicenseChecker:
     total_skipped: int
     total_errors: int
     total_warnings: int
+    file_project: 'dict[str, str]'
 
     def __init__(self, args: dict):
         self.args = args
         self.license_checker = FileLicenseChecker(args.allow_list)
+        self.file_project = {}
+
+    def display_name(self, file_name: str) -> str:
+        '''Prefix a file path with the west module name if it comes from a manifest module.'''
+        module = self.file_project.get(file_name.replace('\\', '/'), '')
+        return f'[{module}] {file_name}' if module else file_name
 
     def run(self, program: str, *args: 'list[str|Path]', cwd=None) -> str:
         '''A helper function to run an external program.'''
@@ -243,14 +250,15 @@ class PatchLicenseChecker:
     def report(self, label: str, message: str, file_name: 'str|Path' = '<none>', license: str = ''):
         '''Report results to the user.'''
         file_name = str(file_name)
+        display_name = self.display_name(file_name)
         # Print to stdout/stderr with optional GitHub Actions Workflow commands.
         if not self.args.github:
             if label in ('error', 'warning'):
-                print(f'{label.upper()}: {file_name}: {message}', file=sys.stderr)
+                print(f'{label.upper()}: {display_name}: {message}', file=sys.stderr)
             else:
-                print(f'{label.upper()}: {file_name}: {message}')
+                print(f'{label.upper()}: {display_name}: {message}')
         else:
-            print(f'{file_name}: ')
+            print(f'{display_name}: ')
             if label in ('error', 'warning'):
                 if file_name != '<none>':
                     try:
@@ -266,7 +274,7 @@ class PatchLicenseChecker:
             else:
                 print(f'{label.upper()}: {message}')
         # Put result in JUnit file.
-        test_case = junit_xml.TestCase(file_name + (f':{license}' if license else ''),
+        test_case = junit_xml.TestCase(display_name + (f':{license}' if license else ''),
                                        'LicenseCheck')
         if label == 'error':
             test_case.add_failure_info(message)
@@ -404,14 +412,18 @@ class PatchLicenseChecker:
                 f'Updated project "{name}": collecting files added in {old_rev[:12]}..'
                 f'{new_rev[:12]}'
             )
-            files += self.added_files(project, old_rev, new_rev)
+            new_files = self.added_files(project, old_rev, new_rev)
+            self.file_project.update((f, name) for f in new_files)
+            files += new_files
         for name, _ in sorted(added):
             project = new_projects[name]
             if self.license_checker.is_excluded_dir(project.path):
                 print(f'Added project "{name}": excluded by the allow list.')
                 continue
             print(f'Added project "{name}": collecting the entire tree at {project.revision[:12]}')
-            files += self.all_files(project, project.revision)
+            new_files = self.all_files(project, project.revision)
+            self.file_project.update((f, name) for f in new_files)
+            files += new_files
         return [Path(f) for f in files]
 
     def skip_files(self, files: 'list[Path]') -> 'list[Path]':
@@ -528,4 +540,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
