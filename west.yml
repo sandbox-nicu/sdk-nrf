@@ -157,7 +157,7 @@ manifest:
       remote: fork_oberon
       path: modules/crypto/oberon-psa-crypto
       repo-path: sdk-oberon-psa-crypto
-      revision: 87917371cc6f3883dbdf0c7751c48a358ab8920a
+      revision: eaad5942bb612c3debe12841e1a05dfbd26fed88
     - name: nrfxlib
       remote: fork_nrfxlib
       repo-path: sdk-nrfxlib
