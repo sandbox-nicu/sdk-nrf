@@ -18,6 +18,7 @@
 #              the workspace relative file path.
 exclude:
   directories:
+    - nrf/tests
     - nrfxlib/blocked_dir
     - modules/crypto/mbedtls
   files:
