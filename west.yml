@@ -26,6 +26,8 @@ manifest:
       url-base: https://github.com/sandbox-nicu    
     - name: fork_mcuboot
       url-base: https://github.com/sandbox-nicu
+    - name: fork_zephyr
+      url-base: https://github.com/sandbox-nicu
     - name: ncs
       url-base: https://github.com/nrfconnect
     # Third-party repository sources:
@@ -72,8 +74,9 @@ manifest:
     # https://developer.nordicsemi.com/nRF_Connect_SDK/doc/latest/zephyr/introduction/index.html
     # https://developer.nordicsemi.com/nRF_Connect_SDK/doc/latest/zephyr/guides/modules.html
     - name: zephyr
+      remote: fork_zephyr
       repo-path: sdk-zephyr
-      revision: da7afd8e63c41a505462d7eb9bfdbce2a4d903cc
+      revision: e8f605ebc2fa1fec301a6e3d6275abf29a3abb31
       import:
         # In addition to the zephyr repository itself, NCS also
         # imports the contents of zephyr/west.yml at the above
