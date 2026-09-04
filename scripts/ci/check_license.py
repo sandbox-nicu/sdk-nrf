@@ -42,7 +42,7 @@ from west.manifest import (
     _manifest_content_at,
 )
 
-NRFCONNECT_URL_PREFIX = 'https://github.com/nrfconnect/'
+NRFCONNECT_URL_PREFIX = 'https://github.com/sandbox-nicu/'
 
 # Messages shown in the output
 LICENSE_ALLOWED = '"*" license is allowed for this file.'
