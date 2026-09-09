@@ -34,13 +34,7 @@ from pathlib import Path
 
 import junit_xml
 import yaml
-from west.manifest import (
-    ImportFlag,
-    ImportedContentType,
-    Manifest,
-    Project,
-    _manifest_content_at,
-)
+from west.manifest import ImportFlag, ImportedContentType, Manifest, Project
 
 NRFCONNECT_URL_PREFIX = 'https://github.com/sandbox-nicu/'
 
@@ -341,11 +335,14 @@ class PatchLicenseChecker:
         Return an imported manifest file, such as "zephyr/west.yml", read from Git at the
         revision the importing manifest pins.
         '''
-        try:
-            self.ensure_revision(self.west_workspace / project.path, project.revision)
-            return _manifest_content_at(project, file, Manifest.encoding, rev=project.revision)
-        except (OSError, subprocess.CalledProcessError):
+        rev = self.ensure_revision(project, project.revision)
+        if rev is None:
             return None
+        try:
+            content = project.read_at(file, rev=rev, cwd=self.west_workspace / project.path)
+        except subprocess.CalledProcessError:
+            return None
+        return content.decode(Manifest.encoding)
 
     def load_projects(self, manifest: Manifest) -> 'dict':
         '''
@@ -363,22 +360,22 @@ class PatchLicenseChecker:
             projects[project.name] = project
         return projects
 
-    def ensure_revision(self, project_dir: Path, revision: str) -> bool:
-        '''Make sure a revision is available locally, fetching it if necessary.'''
-        if (
-            self.try_run(
-                'git', 'cat-file', '-e', f'{revision}^{{commit}}', cwd=project_dir
-            ).returncode
-            == 0
-        ):
-            return True
-        self.try_run('git', 'fetch', '--no-tags', 'origin', revision, cwd=project_dir)
-        return (
-            self.try_run(
-                'git', 'cat-file', '-e', f'{revision}^{{commit}}', cwd=project_dir
-            ).returncode
-            == 0
-        )
+    def ensure_revision(self, project: Project, revision: str) -> 'str|None':
+        '''
+        Return a revision of a project that Git can read locally, or None. A revision that no
+        local ref names, "pull/1234/head" for example, is fetched from the project URL and
+        returned as the commit it points to.
+        '''
+        project_dir = self.west_workspace / project.path
+        if not project_dir.is_dir():
+            return None
+        if self.try_run('git', 'cat-file', '-e', f'{revision}^{{commit}}',
+                        cwd=project_dir).returncode == 0:
+            return revision
+        if self.try_run('git', 'fetch', '--no-tags', project.url, revision,
+                        cwd=project_dir).returncode != 0:
+            return None
+        return self.run('git', 'rev-parse', 'FETCH_HEAD', cwd=project_dir)
 
     def prefix(self, project_path: str, git_output: str) -> 'list[str]':
         '''Prefix each git output line with the project path to make it workspace relative.'''
@@ -389,10 +386,9 @@ class PatchLicenseChecker:
     def added_files(self, project, old_rev: str, new_rev: str) -> 'list[str]':
         '''Return the workspace relative paths of files added between old_rev and new_rev.'''
         project_dir = self.west_workspace / project.path
-        if not (
-            self.ensure_revision(project_dir, old_rev)
-            and self.ensure_revision(project_dir, new_rev)
-        ):
+        old_rev = self.ensure_revision(project, old_rev)
+        new_rev = self.ensure_revision(project, new_rev)
+        if not (old_rev and new_rev):
             return []
         out = self.run(
             'git',
@@ -407,7 +403,8 @@ class PatchLicenseChecker:
     def all_files(self, project, new_rev: str) -> 'list[str]':
         '''Return the workspace relative paths of all files at new_rev (newly added project).'''
         project_dir = self.west_workspace / project.path
-        if not self.ensure_revision(project_dir, new_rev):
+        new_rev = self.ensure_revision(project, new_rev)
+        if not new_rev:
             return []
         out = self.run('git', 'ls-tree', '-r', '--name-only', new_rev, cwd=project_dir)
         return self.prefix(project.path, out)
@@ -573,7 +570,6 @@ def main():
     success = checker.check()
     if not success:
         sys.exit(1)
-
 
 if __name__ == '__main__':
     main()
