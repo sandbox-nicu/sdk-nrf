@@ -155,7 +155,7 @@ manifest:
       remote: fork_mbedtls
       path: modules/crypto/mbedtls
       repo-path: sdk-mbedtls
-      revision: 5b7ca76723b3aa77a9ab066e552fe0dca4975f45
+      revision: c3b5eabecbd71e24543e15e0b5b291a49c04bcd8
     - name: oberon-psa-crypto
       remote: fork_oberon
       path: modules/crypto/oberon-psa-crypto
