@@ -89,12 +89,7 @@ jobs:
   sbom:
     name: Generate, sign and verify the SBOM
     needs: toolchain-image
-    runs-on:
-      - runs-on=${{ github.run_id }}
-      - runner=16cpu-linux-x64
-      - volume=120gb
-      - family=c6id+m6id+r6id
-      - ram=64+128
+    runs-on: ubuntu-24.04
     container:
       image: ${{ needs.toolchain-image.outputs.image }}
     environment: sbom-signing
@@ -141,7 +136,7 @@ jobs:
           report="$GITHUB_WORKSPACE/sbom/$name"
 
           west ncs-sbom \
-            --input-files '**/*' '!**/.git' '!**/.git/**/*' '!.west/**/*' \
+            --input-dir nrf/include/bluetooth \
             --spdx-version "$SPDX_VERSION" \
             --output-spdx "$report" \
             --sign-key "$key"
