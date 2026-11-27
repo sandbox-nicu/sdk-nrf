@@ -9,10 +9,14 @@
  * state of the Wi-Fi subsystem.
  */
 
+#include <zephyr/devicetree.h>
 #include <zephyr/kernel.h>
+#include <zephyr/devicetree.h>
+#include <zephyr/devicetree/mbox.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/sys_io.h>
 
+#include <hal/nrf_bellboard.h>
 #include <hal/nrf_lrcconf.h>
 #include <hal/nrf_vpr.h>
 #include <nrfx.h>
@@ -44,15 +48,31 @@ LOG_MODULE_REGISTER(wifi_pm, CONFIG_WIFI_NRF71_LOG_LEVEL);
 /* System off token for Wi-Fi subsystem */
 #define WIFI_SYSTEM_OFF_TOKEN           0x280002FCUL
 
+/* OSCILLATORS PLL.DBG.REQUESTMODE, not part of the public MDK. Only the
+ * non-secure alias is writable, a write to the secure one bus faults.
+ */
+#define WIFI_PLL_DBG_REQUESTMODE        (NRF_OSCILLATORS_NS_BASE + 0x834UL)
+
 /* RPU reset poll timeout */
 #define RPU_RESET_TIMEOUT_US            3000
 
+/* Bellboard and channel used by the host to ring the UMAC over ipc0 */
+#define WIFI_IPC_NODE                   DT_NODELABEL(ipc0)
+#define WIFI_IPC_TX_BELLBOARD \
+	((NRF_BELLBOARD_Type *)DT_REG_ADDR(DT_MBOX_CTLR_BY_NAME(WIFI_IPC_NODE, tx)))
+#define WIFI_IPC_TX_CHANNEL             DT_MBOX_CHANNEL_BY_NAME(WIFI_IPC_NODE, tx)
+
 int nrf_wifi_power_on(void)
 {
-	/* Already started by SoC init */
 	if (nrf_vpr_cpurun_get(NRF_WIFICORE_LMAC_VPR)) {
-		LOG_DBG("LMAC already running, skipping Wi-Fi power on");
-		return 0;
+		int ret;
+
+		LOG_WRN("LMAC running at power-on, restarting Wi-Fi");
+		ret = nrf_wifi_power_off();
+		if (ret) {
+			LOG_ERR("Failed to reset running Wi-Fi subsystem: %d", ret);
+			return ret;
+		}
 	}
 
 	LOG_DBG("Powering on Wi-Fi subsystem");
@@ -86,6 +106,8 @@ static void vpr_reset(NRF_VPR_Type *vpr)
 
 int nrf_wifi_power_off(void)
 {
+	NRF_BELLBOARD_Type *const wifi_bellboard =
+		(NRF_BELLBOARD_Type *)DT_REG_ADDR(DT_NODELABEL(wifi_bellboard));
 	uint32_t timeout_us = RPU_RESET_TIMEOUT_US;
 	int ret = 0;
 
@@ -96,6 +118,14 @@ int nrf_wifi_power_off(void)
 	nrf_vpr_cpurun_set(NRF_WIFICORE_UMAC_VPR, false);
 	vpr_reset(NRF_WIFICORE_LMAC_VPR);
 	vpr_reset(NRF_WIFICORE_UMAC_VPR);
+
+	/* A host doorbell that the UMAC did not service before being halted stays
+	 * latched, and the interrupt it raises towards the halted Wi-Fi core keeps
+	 * the WIFICORE domain from collapsing. The firmware set the interrupt enable
+	 * at boot and the RPU reset below does not clear it, so drop the event here.
+	 */
+	nrf_bellboard_event_clear(WIFI_IPC_TX_BELLBOARD,
+				  nrf_bellboard_triggered_event_get(WIFI_IPC_TX_CHANNEL));
 
 	/* Force the next LMAC start to be classified as a cold boot. The RPU ROM
 	 * checks these values before entering its startup sequence.
@@ -108,6 +138,15 @@ int nrf_wifi_power_off(void)
 	/* Release the RF clock and voltage-upscale requests */
 	sys_write32(WIFI_RF_CLOCK_INT_EXT, WIFI_RF_CLOCK_CTRL_CLR);
 	sys_write32(0, WIFI_UPSCALE_REQ);
+
+	/* The LMAC requests PLL locked mode at boot as a Wi-Fi clock workaround
+	 * and only drops it on its own sleep entry. With the cores halted the
+	 * request stays on, keeping the PLL and HFXO running and the system out
+	 * of ELV (~1.5 mA), so drop it here.
+	 * TODO: Only needed on the first nRF7120 revision, skip it once later
+	 * revisions are supported.
+	 */
+	sys_write32(0, WIFI_PLL_DBG_REQUESTMODE);
 
 	/* Assert RPU reset, wait for reset status, then deassert reset */
 	sys_write32(0xFFFFFFFF, WIFI_RESET_ASSERT1);
@@ -124,6 +163,13 @@ int nrf_wifi_power_off(void)
 	}
 
 	sys_write32(0xFFFFFFFF, WIFI_RESET_DEASSERT1);
+
+	for (uint8_t event_index = 0; event_index < NRF_BELLBOARD_EVENTS_TRIGGERED_COUNT;
+	     event_index++) {
+		nrf_bellboard_event_clear(wifi_bellboard,
+					 nrf_bellboard_triggered_event_get(event_index));
+	}
+	__DSB();
 
 	/* Disable automatic clock gating and RAMs */
 	sys_write32(1, WIFI_AUTOCG_CLR_ALL);
@@ -143,5 +189,33 @@ int nrf_wifi_power_off(void)
 				      false);
 	__DSB();
 
+	/* Allow the power-off sequence to settle. The 1 ms delay is empirical.
+	 * A hardware-specified minimum has not been confirmed.
+	 */
+	k_busy_wait(1000);
+
 	return ret;
 }
+
+#if defined(CONFIG_NRF71_SYSTEM_MODE) || defined(CONFIG_NRF71_OFFLOADED_RAW_TX)
+/*
+ * An application core reset can leave Wi-Fi state from the previous kernel.
+ * SOC_NRF71_WIFI_BOOT currently starts LMAC before this hook, so cleanup
+ * normally powers Wi-Fi off before system or offloaded-raw initialization restarts it.
+ * CPURUN alone does not detect every retained state if that setup is removed.
+ * SoC setup runs from the Arm reset hook before the init table. EARLY priority 0
+ * places cleanup after that setup and before GRTC initialization at priority 1.
+ */
+static int nrf_wifi_power_init(void)
+{
+	int ret = 0;
+
+	if (nrf_vpr_cpurun_get(NRF_WIFICORE_LMAC_VPR)) {
+		ret = nrf_wifi_power_off();
+	}
+
+	return ret;
+}
+
+SYS_INIT(nrf_wifi_power_init, EARLY, 0);
+#endif

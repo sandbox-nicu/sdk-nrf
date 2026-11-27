@@ -29,6 +29,9 @@
 #include <common/fmac_structs_common.h>
 #include <common/wifi_ipc.h>
 #include <system/drv_dbg_stats.h>
+#if defined(CONFIG_NRF71_SYSTEM_MODE) && defined(CONFIG_NRF_WIFI_RPU_RECOVERY)
+#include <system/fmac_api.h>
+#endif
 
 LOG_MODULE_DECLARE(wifi_nrf, CONFIG_WIFI_NRF71_LOG_LEVEL);
 
@@ -512,11 +515,9 @@ int ipc_init(void)
 	return 0;
 }
 
-int ipc_deinit(void)
+static void ipc_close_instance(void)
 {
 	int ret;
-
-	host_tx_reclaim_completed();
 
 	if (nrf_wifi_ipc_host_tx.busy_q.ipc_bound) {
 		ret = ipc_service_deregister_endpoint(&nrf_wifi_ipc_host_tx.busy_q.ipc_ep);
@@ -530,15 +531,23 @@ int ipc_deinit(void)
 		}
 	}
 
+	nrf_wifi_ipc_host_tx.busy_q.ipc_bound = false;
+	nrf_wifi_ipc_host_tx.busy_q.ipc_ready = false;
+	nrf_wifi_ipc_host_rx.busy_q.ipc_bound = false;
+	nrf_wifi_ipc_host_rx.busy_q.ipc_ready = false;
+}
+
+int ipc_deinit(void)
+{
+	host_tx_reclaim_completed();
+
+	ipc_close_instance();
+
 	/* The peer has been halted and power-isolated, so no further
 	 * acknowledgments can arrive. Release all command buffers in flight.
 	 */
 	host_tx_abort_pending();
 
-	nrf_wifi_ipc_host_tx.busy_q.ipc_bound = false;
-	nrf_wifi_ipc_host_tx.busy_q.ipc_ready = false;
-	nrf_wifi_ipc_host_rx.busy_q.ipc_bound = false;
-	nrf_wifi_ipc_host_rx.busy_q.ipc_ready = false;
 	nrf_wifi_ipc_rx_ctx_shared = NULL;
 
 	return 0;
@@ -699,6 +708,23 @@ bool nrf_wifi_ipc_is_open(struct nrf_wifi_fmac_dev_ctx *fmac_dev_ctx)
 	return inst != NULL && inst->locks_inited;
 }
 
+void nrf_wifi_ipc_shutdown(struct nrf_wifi_fmac_dev_ctx *fmac_dev_ctx)
+{
+	struct nrf_wifi_ipc_inst *inst = ipc_inst_bound(fmac_dev_ctx);
+
+	if (!inst) {
+		return;
+	}
+
+	if (inst->locks_inited) {
+		k_mutex_lock(&inst->rx_lock, K_FOREVER);
+		inst->rx_active = false;
+		k_mutex_unlock(&inst->rx_lock);
+	}
+
+	ipc_close_instance();
+}
+
 void nrf_wifi_ipc_close(struct nrf_wifi_fmac_dev_ctx *fmac_dev_ctx)
 {
 	struct nrf_wifi_ipc_inst *inst = ipc_inst_bound(fmac_dev_ctx);
@@ -753,6 +779,13 @@ enum nrf_wifi_status nrf_wifi_ipc_cmd_send(struct nrf_wifi_fmac_dev_ctx *fmac_de
 		nrf_wifi_drv_dbg_fmac_err(fmac_dev_ctx, NRF_WIFI_DRV_DBG_ERR_CMD_SEND);
 		if (ret == -ETIMEDOUT) {
 			nrf_wifi_drv_dbg_fmac_tmo(fmac_dev_ctx, NRF_WIFI_DRV_DBG_TMO_IPC_TX);
+#if defined(CONFIG_NRF71_SYSTEM_MODE) && defined(CONFIG_NRF_WIFI_RPU_RECOVERY)
+			if (fmac_dev_ctx->fw_init_done && !fmac_dev_ctx->fw_deinit_done &&
+			    inst->rx_active) {
+				LOG_ERR("Host IPC TX timeout, scheduling RPU recovery");
+				nrf_wifi_sys_fmac_rpu_recovery_callback(fmac_dev_ctx, NULL, 0);
+			}
+#endif
 		}
 		return NRF_WIFI_STATUS_FAIL;
 	}
