@@ -25,7 +25,7 @@ concurrency:
 jobs:
   sbom:
     name: Signed SBOM
-    uses: uses: nicu1989/action-sbom-upload/.github/workflows/action.yml@main
+    uses: nicu1989/action-sbom-upload/.github/workflows/action.yml@main
     with:
       ncs_ref: ${{ inputs.ncs_ref }}
       spdx_version: ${{ inputs.spdx_version }}
